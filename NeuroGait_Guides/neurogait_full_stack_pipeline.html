@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NeuroGait — Full Stack: Solo Rubble to Multi-Robot Comms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#15181b; --panel:#1d2126; --panel-2:#252a31;
+    --ink:#ece7dc; --ink-dim:#9aa0a6;
+    --line:rgba(236,231,220,0.10); --line-strong:rgba(236,231,220,0.20);
+    --data:#5fd0c9; --signal:#ff8c42; --warn:#e2533a; --terrain:#b9a87c; --comm:#c792ea;
+    --font-display:'Space Grotesk',sans-serif;
+    --font-body:'Inter',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{ background:var(--bg); color:var(--ink); font-family:var(--font-body); line-height:1.65; -webkit-font-smoothing:antialiased; }
+
+  .shell{ display:flex; min-height:100vh; }
+  .rail{
+    flex:0 0 250px; border-right:1px solid var(--line); background:var(--panel);
+    padding:26px 16px; position:sticky; top:0; height:100vh; overflow-y:auto;
+  }
+  .rail .brand{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; color:var(--data); margin-bottom:4px; }
+  .rail h1{ font-family:var(--font-display); font-size:17px; margin:0 0 20px; font-weight:600; line-height:1.3; }
+  .rail nav a{
+    display:block; font-family:var(--font-mono); font-size:11px; color:var(--ink-dim);
+    text-decoration:none; padding:6px 0; border-left:2px solid transparent; padding-left:10px;
+    margin-left:-10px; transition:color .15s, border-color .15s;
+  }
+  .rail nav a:hover, .rail nav a.active{ color:var(--ink); border-color:var(--signal); }
+  .rail .phasetag{ display:block; font-size:9px; color:var(--ink-dim); opacity:.75; margin:14px 0 3px 0; text-transform:uppercase; letter-spacing:.12em; }
+
+  .content{ flex:1; min-width:0; padding:46px 54px 130px; max-width:900px; }
+  @media(max-width:900px){ .rail{ display:none; } .content{ padding:30px 18px 100px; } }
+
+  section{ margin-bottom:60px; scroll-margin-top:24px; }
+  .eyebrow{ font-family:var(--font-mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--data); }
+  .eyebrow.p2{ color:var(--signal); }
+  .eyebrow.p3{ color:var(--terrain); }
+  .eyebrow.p4{ color:var(--comm); }
+  h2{ font-family:var(--font-display); font-size:clamp(21px,3vw,28px); font-weight:600; margin:8px 0 16px; letter-spacing:-0.01em; }
+  h3{ font-family:var(--font-display); font-size:16px; font-weight:600; margin:26px 0 10px; }
+  h4{ font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-dim); margin:18px 0 8px; }
+  p{ font-size:14px; color:var(--ink); margin:0 0 12px; }
+  .dim{ color:var(--ink-dim); }
+  code, .mono{ font-family:var(--font-mono); font-size:0.92em; }
+  code{ background:var(--panel-2); padding:1px 5px; border-radius:4px; }
+
+  .banner{ border:1px solid var(--line-strong); background:var(--panel); border-radius:10px; padding:16px 18px; margin-bottom:10px; }
+  .banner p{ margin:8px 0 0; }
+  .banner.warn{ border-color:var(--warn); background:rgba(226,83,58,0.07); }
+  .banner.warn .eyebrow{ color:var(--warn); }
+
+  /* phase pills nav */
+  .phase-pills{ display:flex; gap:8px; margin-bottom:30px; flex-wrap:wrap; }
+  .phase-pills a{
+    font-family:var(--font-mono); font-size:11px; text-decoration:none; color:var(--ink-dim);
+    border:1px solid var(--line); border-radius:20px; padding:7px 14px; transition:border-color .15s, color .15s;
+  }
+  .phase-pills a:hover{ color:var(--ink); border-color:var(--line-strong); }
+  .phase-pills a.cur1{ border-color:var(--data); }
+  .phase-pills a.cur2{ border-color:var(--signal); }
+  .phase-pills a.cur3{ border-color:var(--terrain); }
+  .phase-pills a.cur4{ border-color:var(--comm); }
+
+  /* timeline */
+  .timeline{ border-left:2px solid var(--line-strong); padding-left:22px; margin-top:16px; }
+  .day{ position:relative; margin-bottom:26px; }
+  .day::before{ content:""; position:absolute; left:-28px; top:3px; width:11px; height:11px; border-radius:50%; background:var(--dotcolor,var(--signal)); border:2px solid var(--bg); }
+  .day .when{ font-family:var(--font-mono); font-size:10.5px; color:var(--dotcolor,var(--signal)); letter-spacing:.1em; text-transform:uppercase; margin-bottom:4px; }
+  .day h4.daytitle{ font-family:var(--font-display); font-size:15.5px; margin:0 0 8px; font-weight:600; text-transform:none; letter-spacing:0; color:var(--ink); }
+  .why{ font-size:13px; color:var(--ink-dim); margin:0 0 10px; padding:8px 12px; background:var(--panel-2); border-radius:8px; border-left:2px solid var(--dotcolor,var(--signal)); }
+  .why b{ color:var(--ink); }
+  .tasklist{ list-style:none; margin:0; padding:0; }
+  .tasklist li{ font-size:13px; padding:6px 0 6px 20px; position:relative; color:var(--ink); border-bottom:1px solid var(--line); }
+  .tasklist li:last-child{ border-bottom:none; }
+  .tasklist li::before{ content:"○"; position:absolute; left:0; color:var(--dotcolor,var(--data)); font-size:10px; top:8px; }
+  .tasklist li b{ color:var(--ink); font-weight:600; }
+  .tasklist li .file{ color:var(--data); }
+  .tasklist li.check::before{ content:"✓"; color:var(--terrain); }
+
+  /* file tree */
+  .filetree{
+    font-family:var(--font-mono); font-size:12px; background:var(--panel-2);
+    border:1px solid var(--line); border-radius:10px; padding:16px 18px; overflow-x:auto;
+    line-height:1.8; white-space:pre;
+  }
+  .filetree .dir{ color:var(--data); }
+  .filetree .new1{ color:var(--data); }
+  .filetree .new2{ color:var(--signal); }
+  .filetree .new3{ color:var(--terrain); }
+  .filetree .new4{ color:var(--comm); }
+  .filetree .existing{ color:var(--ink-dim); }
+  .filetree .cmt{ color:var(--ink-dim); }
+
+  .legend-row{ display:flex; gap:16px; flex-wrap:wrap; margin:10px 0 18px; font-family:var(--font-mono); font-size:11px; color:var(--ink-dim); }
+  .legend-row .swatch{ display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; vertical-align:middle; }
+
+  .tagcards{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0; }
+  @media(max-width:640px){ .tagcards{ grid-template-columns:1fr; } }
+  .tagcard{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:13px 15px; }
+  .tagcard .path{ font-family:var(--font-mono); font-size:11.5px; color:var(--signal); display:block; margin-bottom:5px; word-break:break-all; }
+  .tagcard p{ font-size:12px; margin:0; color:var(--ink-dim); }
+
+  .diagram-wrap{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px; overflow-x:auto; margin:16px 0; }
+  .diagram-wrap svg{ display:block; min-width:600px; }
+  .node-box{ fill:var(--panel-2); stroke:var(--line-strong); stroke-width:1; rx:8; }
+  .node-box.control{ stroke:var(--signal); }
+  .node-box.data{ stroke:var(--data); }
+  .node-box.comm{ stroke:var(--comm); }
+  .node-text{ font-family:'JetBrains Mono',monospace; fill:var(--ink); font-size:11px; }
+  .node-sub{ font-family:'Inter',sans-serif; fill:var(--ink-dim); font-size:9.5px; }
+  .flow-line{ stroke:var(--ink-dim); stroke-width:1.4; fill:none; marker-end:url(#arrow); }
+  .flow-line.feedback{ stroke:var(--data); stroke-dasharray:4 3; }
+  .flow-line.comm{ stroke:var(--comm); stroke-dasharray:3 2; }
+  .flow-label{ font-family:'JetBrains Mono',monospace; fill:var(--ink-dim); font-size:9.5px; }
+
+  .metrics{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:14px 0; }
+  @media(max-width:700px){ .metrics{ grid-template-columns:1fr; } }
+  .metric{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:13px 15px; }
+  .metric .m-name{ font-family:var(--font-display); font-weight:600; font-size:13.5px; margin-bottom:3px; }
+  .metric .m-formula{ font-family:var(--font-mono); font-size:10.5px; color:var(--data); display:block; margin-bottom:5px; }
+  .metric p{ font-size:11.5px; color:var(--ink-dim); margin:0; }
+
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; margin:14px 0; }
+  th,td{ text-align:left; padding:7px 9px; border-bottom:1px solid var(--line); }
+  th{ font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-dim); }
+  td.mono{ font-family:var(--font-mono); font-size:11.5px; color:var(--data); }
+
+  .callout{ border-left:3px solid var(--data); padding:4px 0 4px 16px; margin:14px 0; }
+  .callout.p2{ border-left-color:var(--signal); }
+  .callout.p3{ border-left-color:var(--terrain); }
+  .callout.p4{ border-left-color:var(--comm); }
+  .callout p{ color:var(--ink-dim); font-size:13px; }
+
+  /* code why blocks */
+  .codewhy{ background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:12px 0; }
+  .codewhy .ch-head{ font-family:var(--font-mono); font-size:11.5px; color:var(--signal); margin-bottom:8px; display:flex; justify-content:space-between; }
+  .codewhy pre{ margin:0 0 8px; font-family:var(--font-mono); font-size:11.5px; color:var(--data); overflow-x:auto; white-space:pre-wrap; line-height:1.6; }
+  .codewhy .ch-why{ font-size:12.5px; color:var(--ink-dim); margin:0; }
+  .codewhy .ch-why b{ color:var(--ink); }
+
+  .topgap{ scroll-margin-top:80px; }
+  footer{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-dim); padding-top:18px; border-top:1px solid var(--line); }
+
+  .growth-strip{ display:flex; align-items:stretch; gap:8px; margin:16px 0; overflow-x:auto; }
+  .growth-step{ flex:1 1 0; min-width:140px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .growth-step .gnum{ font-family:var(--font-mono); font-size:10px; color:var(--ink-dim); }
+  .growth-step h5{ font-family:var(--font-display); font-size:13px; margin:4px 0 6px; font-weight:600; }
+  .growth-step p{ font-size:11px; color:var(--ink-dim); margin:0; }
+  .growth-step.p1{ border-top:3px solid var(--data); }
+  .growth-step.p2{ border-top:3px solid var(--signal); }
+  .growth-step.p3{ border-top:3px solid var(--terrain); }
+  .growth-step.p4{ border-top:3px solid var(--comm); }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="rail">
+    <div class="brand">NEUROGAIT // FULL STACK</div>
+    <h1>Solo rubble → multi-robot comms</h1>
+    <nav id="toc">
+      <a href="#scope">How to use this doc</a>
+      <a href="#growth">How the stack grows</a>
+
+      <span class="phasetag" style="color:var(--data)">Phase 01 · static rubble</span>
+      <a href="#p1-why">Why this phase</a>
+      <a href="#p1-arch">Architecture</a>
+      <a href="#p1-days">Day-by-day</a>
+      <a href="#p1-files">Directory + file roles</a>
+
+      <span class="phasetag" style="color:var(--signal)">Phase 02 · dynamic obstacles</span>
+      <a href="#p2-why">Why this phase</a>
+      <a href="#p2-arch">What's added</a>
+      <a href="#p2-days">Day-by-day</a>
+      <a href="#p2-files">Directory diff</a>
+
+      <span class="phasetag" style="color:var(--terrain)">Phase 03 · multi-objective</span>
+      <a href="#p3-why">Why this phase</a>
+      <a href="#p3-arch">What's added</a>
+      <a href="#p3-days">Day-by-day</a>
+      <a href="#p3-files">Directory diff</a>
+
+      <span class="phasetag" style="color:var(--comm)">Phase 04 · multi-robot</span>
+      <a href="#p4-why">Why this phase</a>
+      <a href="#p4-arch">What's added</a>
+      <a href="#p4-days">Day-by-day</a>
+      <a href="#p4-files">Directory diff</a>
+
+      <span class="phasetag">Reference</span>
+      <a href="#final-tree">Final directory tree</a>
+      <a href="#timeline-summary">Full timeline summary</a>
+      <a href="#metrics-ref">Metrics reference</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+
+    <section id="scope" class="topgap">
+      <span class="eyebrow">Read me first</span>
+      <h2>How to use this document</h2>
+      <p>
+        This covers the entire navigation stack, end to end: from a single robot
+        walking through static rubble, all the way to multiple robots sharing
+        information with each other. It's organized as four phases, and each phase
+        has the same four sections — <b>why</b> this phase exists, <b>what
+        architecture gets added</b>, a <b>day-by-day plan</b>, and how the
+        <b>project directory changes</b>. The goal isn't to hand you code to paste —
+        it's to let you understand <i>why</i> each piece exists before you write it,
+        so when something breaks (and something will break) you know what it's
+        supposed to be doing.
+      </p>
+      <div class="banner">
+        <span class="eyebrow">A note on realistic timing</span>
+        <p>
+          This is the <b>full, research-grade</b> version — the one with real vision
+          perception, the proprioception feedback loop, multi-objective Pareto
+          sweeps, and multi-robot communication. Realistically this is a
+          <b>4 to 6 week</b> body of work, not a few days. Each phase below states
+          its own time estimate; treat the day-by-day breakdowns as "what a day of
+          focused work on this phase looks like," not as a guarantee you'll finish
+          a whole phase in the days shown if you're also doing coursework, debugging
+          unrelated things, or this is your first time touching some of these tools.
+        </p>
+      </div>
+    </section>
+
+    <section id="growth">
+      <h3>How the stack grows, at a glance</h3>
+      <p>Each phase adds exactly one new capability on top of the last. Nothing already working gets rebuilt — this is deliberate, so a failure in phase 3 doesn't put phase 1's progress at risk.</p>
+      <div class="growth-strip">
+        <div class="growth-step p1"><span class="gnum">PHASE 01</span><h5>Perceive + plan + act</h5><p>Depth camera, A* over known map, PPO policy, frozen locomotion. One robot, still obstacles.</p></div>
+        <div class="growth-step p2"><span class="gnum">PHASE 02</span><h5>+ react to motion</h5><p>Obstacles move. Frame-stacking gives implicit velocity. A risk-prediction head anticipates collisions.</p></div>
+        <div class="growth-step p3"><span class="gnum">PHASE 03</span><h5>+ trade off objectives</h5><p>One reward becomes four (progress, energy, jerk, time). Train several weightings, compare the tradeoffs.</p></div>
+        <div class="growth-step p4"><span class="gnum">PHASE 04</span><h5>+ talk to each other</h5><p>Multiple robots, each running phases 1-3, now exchange compressed messages about what they see and intend.</p></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- PHASE 1 -->
+    <!-- ============================================================ -->
+
+    <section id="p1-why" class="topgap" style="--dotcolor:#5fd0c9">
+      <div class="phase-pills">
+        <a href="#p1-why" class="cur1">01 static rubble</a>
+        <a href="#p2-why">02 dynamic obstacles</a>
+        <a href="#p3-why">03 multi-objective</a>
+        <a href="#p4-why">04 multi-robot</a>
+      </div>
+      <span class="eyebrow">Phase 01 · ~1.5-2 weeks</span>
+      <h2>Static rubble navigation</h2>
+      <p>
+        A single Go2 walks from a start point to a goal through a field of static
+        rubble — fallen pillars, debris, uneven terrain — using real depth-camera
+        perception, not privileged sim state. This is the foundation every later
+        phase sits on, so it's worth getting genuinely right rather than rushing.
+      </p>
+      <h4>Why build it this way</h4>
+      <div class="why">
+        <b>Why a frozen locomotion policy underneath, instead of training everything together?</b>
+        Your locomotion policy already knows how to walk — that problem is solved.
+        If you let navigation training also update locomotion weights, every change
+        to the navigation reward risks un-learning walking, and debugging becomes
+        "is my new reward bad, or did I just break gait stability?" with no way to
+        tell which. Freezing locomotion means navigation failures are unambiguously
+        navigation failures.
+      </div>
+      <div class="why">
+        <b>Why A* for the global route instead of letting RL find the way?</b>
+        The rubble layout is something <i>you</i> build — it's known, in full, before
+        the robot ever takes a step. RL is the right tool for things that are hard to
+        specify in advance (how to react to a camera frame you've never seen before);
+        it's the wrong, slow tool for "what's the shortest path through a maze I
+        already have the blueprint for." A* solves that instantly. Save the learning
+        budget for the part that actually needs it.
+      </div>
+      <div class="why">
+        <b>Why depth camera instead of just trusting the height-scan you already have?</b>
+        Your height-scan tells you about the ground under and near the robot's feet
+        — it's a locomotion-scale sensor. A fallen pillar at head height, or a wall
+        two meters ahead, isn't something a foot-level height-scan sees coming. The
+        navigation policy needs to look <i>outward</i>, not just <i>downward</i>.
+      </div>
+    </section>
+
+    <section id="p1-arch">
+      <h3>Architecture for Phase 01</h3>
+      <div class="legend-row">
+        <span><span class="swatch" style="background:var(--data)"></span>sensing / mapping</span>
+        <span><span class="swatch" style="background:var(--signal)"></span>planning &amp; control</span>
+      </div>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 600" width="700" height="600">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="var(--ink-dim)" stroke-width="1.5" stroke-linecap="round"/>
+            </marker>
+          </defs>
+
+          <rect class="node-box data" x="170" y="20" width="360" height="56" rx="8"/>
+          <text class="node-text" x="350" y="44" text-anchor="middle">depth camera (onboard)</text>
+          <text class="node-sub" x="350" y="62" text-anchor="middle">raw depth image, every control step</text>
+
+          <path class="flow-line" d="M350 76 V 116"/>
+
+          <rect class="node-box data" x="170" y="116" width="360" height="56" rx="8"/>
+          <text class="node-text" x="350" y="140" text-anchor="middle">egocentric occupancy grid</text>
+          <text class="node-sub" x="350" y="158" text-anchor="middle">project depth points → 40×40 grid, ~8m × 8m</text>
+
+          <path class="flow-line" d="M350 172 V 212"/>
+
+          <rect class="node-box data" x="170" y="212" width="360" height="56" rx="8"/>
+          <text class="node-text" x="350" y="236" text-anchor="middle">combined cost map</text>
+          <text class="node-sub" x="350" y="254" text-anchor="middle">occupancy + height-scan terrain + goal vector</text>
+
+          <path class="flow-line" d="M350 268 V 308"/>
+
+          <rect class="node-box control" x="170" y="308" width="360" height="56" rx="8"/>
+          <text class="node-text" x="350" y="332" text-anchor="middle">A* waypoint planner</text>
+          <text class="node-sub" x="350" y="350" text-anchor="middle">runs once per goal, over the known static layout</text>
+
+          <path class="flow-line" d="M350 364 V 404"/>
+
+          <rect class="node-box control" x="170" y="404" width="360" height="64" rx="8"/>
+          <text class="node-text" x="350" y="428" text-anchor="middle">PPO navigation policy (skrl)</text>
+          <text class="node-sub" x="350" y="446" text-anchor="middle">CNN(cost grid) + goal vec + state → vx, vy, ω</text>
+          <text class="node-sub" x="350" y="460" text-anchor="middle">reward: progress + heading + collision + smoothness</text>
+
+          <path class="flow-line" d="M350 468 V 508"/>
+
+          <rect class="node-box" x="170" y="508" width="360" height="56" rx="8"/>
+          <text class="node-text" x="350" y="532" text-anchor="middle">frozen locomotion policy</text>
+          <text class="node-sub" x="350" y="550" text-anchor="middle">unchanged — tracks (vx, vy, ω) → 12 joint torques</text>
+        </svg>
+      </div>
+      <div class="callout">
+        <p>Notice this is a straight pipeline, no loops yet. That's deliberate —
+        phase 01's job is to prove every individual stage works in isolation before
+        phase 02 adds the complexity of things moving, and phase 03 adds competing
+        objectives. A straight pipeline is also the easiest to debug: if something's
+        wrong, you can check each stage's output one at a time.</p>
+      </div>
+    </section>
+
+    <section id="p1-days">
+      <h3>Day-by-day — Phase 01</h3>
+      <div class="timeline" style="--dotcolor:#5fd0c9">
+
+        <div class="day">
+          <div class="when">Days 1-2</div>
+          <h4 class="daytitle">Scene + sensor, before any RL</h4>
+          <div class="why"><b>Why start here:</b> if the sensor data going into the policy is wrong, no amount of reward-tuning will fix it. Validate this in isolation, visually, before writing a single line of training code.</div>
+          <ul class="tasklist">
+            <li>Build the rubble scene: terrain generator or hand-placed static obstacle primitives in <span class="file">navigation_env_cfg.py</span></li>
+            <li>Add a depth camera sensor definition to the scene config — check Isaac Lab's camera sensor API for resolution/FOV/range</li>
+            <li>Write the projection from depth image → egocentric occupancy grid as a standalone function first, test it on a single saved depth frame before wiring into the env</li>
+            <li class="check">Checkpoint: visualize the occupancy grid next to a screenshot of the scene — do the occupied cells actually line up with where the obstacles are?</li>
+          </ul>
+        </div>
+
+        <div class="day">
+          <div class="when">Days 3-4</div>
+          <h4 class="daytitle">A* planner, standalone</h4>
+          <div class="why"><b>Why standalone:</b> A* is pure graph search — it has nothing to do with Isaac Lab, physics, or RL. Writing and testing it as plain Python first means you can verify correctness with simple print statements and a matplotlib plot, instead of debugging it inside a slow simulation loop.</div>
+          <ul class="tasklist">
+            <li>Implement grid A* over a coarse static-layout cost grid in <span class="file">planner.py</span> — no Isaac Lab imports</li>
+            <li>Unit test: known small grid with a known obstacle, verify the returned path avoids it and is reasonably short</li>
+            <li>Only once that's solid, wire it into a new <b>command term</b> in <span class="file">commands.py</span> that runs the planner on reset and exposes "current waypoint" each step</li>
+            <li class="check">Checkpoint: in the Isaac Lab GUI, does a printed/visualized waypoint sequence trace a sensible route around the rubble?</li>
+          </ul>
+        </div>
+
+        <div class="day">
+          <div class="when">Days 5-7</div>
+          <h4 class="daytitle">Wire the frozen locomotion policy</h4>
+          <div class="why"><b>Why this is its own step, not bundled with reward-writing:</b> this is the exact class of bug you already hit once (the play.py shape mismatch). Isolate it: prove you can load the frozen checkpoint and successfully call it with a hand-typed velocity command before any learned policy is in the loop at all.</div>
+          <ul class="tasklist">
+            <li>Load the frozen locomotion checkpoint inside the new navigation env</li>
+            <li>Manually feed it a constant velocity command (e.g. "always walk forward") and confirm the robot walks correctly in the GUI — this isolates "is locomotion wired right" from "is navigation working"</li>
+            <li>Replace the constant command with a simple hand-coded rule (e.g. "always move toward the current waypoint") — still no RL — and confirm the robot visibly heads toward goals</li>
+            <li class="check">Checkpoint: a non-learned, rule-based "policy" gets the robot most of the way to the goal in a simple scene. This proves the whole pipeline plumbing works before RL enters the picture.</li>
+          </ul>
+        </div>
+
+        <div class="day">
+          <div class="when">Days 8-10</div>
+          <h4 class="daytitle">Observation + reward + first training runs</h4>
+          <div class="why"><b>Why test reward scale before a long run:</b> energy, progress, and collision penalties live on very different numeric scales. If one term is 100x larger than another, PPO will optimize almost entirely for that one term and ignore the rest — this looks like "the policy isn't learning" but is actually "the policy is learning the wrong thing perfectly."</div>
+          <ul class="tasklist">
+            <li>Build the <code>navigation_policy</code> observation group: cost-map (small CNN encoder) + goal vector + robot base state, in <span class="file">observations.py</span></li>
+            <li>Implement reward terms in <span class="file">rewards.py</span>: progress, heading alignment, collision penalty, smoothness — log each as a separate scalar from the start</li>
+            <li>Run a few hundred steps with <i>random</i> actions first, just to confirm reward magnitudes are sane and nothing crashes</li>
+            <li>Write the skrl PPO agent config for navigation (smaller network than locomotion — this is a lower-dimensional problem)</li>
+            <li>Launch a short (~30-60 min) training run and check TensorBoard — is anything trending in the right direction?</li>
+            <li class="check">Checkpoint: reward is increasing, even slowly, and isn't NaN/exploding. Only then commit to a long run.</li>
+          </ul>
+        </div>
+
+        <div class="day">
+          <div class="when">Days 11-14</div>
+          <h4 class="daytitle">Full training + validation</h4>
+          <ul class="tasklist">
+            <li>Run training to convergence (this is mostly waiting + periodic TensorBoard checks, plan other work alongside it)</li>
+            <li>Validate with <span class="file">play.py</span>: does the robot reliably reach goals across several different start/goal pairs in the rubble scene?</li>
+            <li>Write <span class="file">eval_metrics.py</span>: N-episode rollout logging time-to-goal, success rate, collision rate</li>
+            <li class="check">Checkpoint, end of phase 01: a trained nav policy that gets a single robot through static rubble most of the time, with logged metrics as a baseline for later phases to compare against.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="p1-files">
+      <h3>Directory + file roles — after Phase 01</h3>
+      <div class="filetree">
+<span class="dir">neurogait/</span>
+├── <span class="dir">tasks/</span>
+│   ├── <span class="dir">locomotion/</span>              <span class="cmt"># existing, frozen — untouched all project</span>
+│   │   └── <span class="existing">velocity_rough_env_cfg.py</span>
+│   │
+│   └── <span class="dir new1">navigation/</span>              <span class="cmt"># new in phase 01</span>
+│       ├── <span class="new1">__init__.py</span>            <span class="cmt"># registers NeuroGait-Navigation-Rubble-v0</span>
+│       ├── <span class="new1">navigation_env_cfg.py</span>   <span class="cmt"># scene, sensors, manager wiring</span>
+│       ├── <span class="dir new1">mdp/</span>
+│       │   ├── <span class="new1">observations.py</span>     <span class="cmt"># occupancy grid term, goal-vector term</span>
+│       │   ├── <span class="new1">commands.py</span>          <span class="cmt"># A* waypoint → command term</span>
+│       │   ├── <span class="new1">rewards.py</span>           <span class="cmt"># progress, heading, collision, smoothness</span>
+│       │   └── <span class="new1">terminations.py</span>      <span class="cmt"># goal-reached, collision, timeout</span>
+│       └── <span class="new1">planner.py</span>              <span class="cmt"># standalone grid A* — unit-testable alone</span>
+│
+├── <span class="dir">agents/</span>
+│   ├── <span class="existing">skrl_rough_ppo_cfg_v2.yaml</span>  <span class="cmt"># existing locomotion PPO config</span>
+│   └── <span class="new1">skrl_nav_ppo_cfg.yaml</span>       <span class="cmt"># new — nav policy PPO config</span>
+│
+└── <span class="dir">scripts/</span>
+    ├── <span class="existing">list_envs.py</span>
+    ├── <span class="existing">play.py</span>
+    └── <span class="new1">eval_metrics.py</span>          <span class="cmt"># time-to-goal / success / collision CSV</span>
+      </div>
+      <div class="tagcards">
+        <div class="tagcard"><span class="path">mdp/observations.py</span><p>Turns the depth camera's raw output into the egocentric occupancy grid, and computes the goal distance/bearing each step. This is the file most worth getting right — every later phase's perception additions build on top of what this returns.</p></div>
+        <div class="tagcard"><span class="path">mdp/commands.py</span><p>Replaces the locomotion env's random velocity-command sampler. Calls <code>planner.py</code> once per episode/goal, tracks which waypoint is "current," and on each step accepts the nav policy's action as the actual velocity passed to the frozen locomotion policy.</p></div>
+        <div class="tagcard"><span class="path">planner.py</span><p>Pure-Python A*, deliberately isolated from Isaac Lab so it can be tested on its own. If navigation ever behaves strangely, checking this file in isolation (does it return sane waypoints for a given map?) rules out a whole category of bugs fast.</p></div>
+        <div class="tagcard"><span class="path">eval_metrics.py</span><p>Loads a trained nav checkpoint plus the frozen locomotion checkpoint, runs N episodes, writes one row per episode. This script's output is your evidence that phase 01 actually works, and the same script gets extended (not replaced) in phases 02-03.</p></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- PHASE 2 -->
+    <!-- ============================================================ -->
+
+    <section id="p2-why" class="topgap" style="--dotcolor:#ff8c42">
+      <div class="phase-pills">
+        <a href="#p1-why">01 static rubble</a>
+        <a href="#p2-why" class="cur2">02 dynamic obstacles</a>
+        <a href="#p3-why">03 multi-objective</a>
+        <a href="#p4-why">04 multi-robot</a>
+      </div>
+      <span class="eyebrow p2">Phase 02 · ~1-1.5 weeks</span>
+      <h2>Dynamic obstacles</h2>
+      <p>
+        People and objects now move through the scene — scripted motion is enough,
+        they don't need their own intelligence. The navigation policy has to react
+        to things it can't predict in advance, which is precisely the part A* can't
+        help with, since the global route only knows about the static layout.
+      </p>
+      <h4>Why build it this way</h4>
+      <div class="why" style="border-left-color:var(--signal)">
+        <b>Why frame-stacking instead of an explicit tracker?</b>
+        You could build a module that detects an obstacle, tracks its position over
+        time, and estimates its velocity — that's a real, separate engineering
+        project. Stacking the last 2-3 occupancy grids as channels gets you almost
+        the same information for free: a static obstacle looks identical across all
+        stacked frames, a moving one visibly shifts position between them. The CNN
+        encoder you already built in phase 01 can learn to read that shift on its
+        own, the same way frame-stacked Atari agents learn to perceive ball velocity
+        without anyone building a tracker.
+      </div>
+      <div class="why" style="border-left-color:var(--signal)">
+        <b>Why no replanning when an obstacle moves?</b>
+        A*'s output only depends on the static layout — rubble doesn't get up and
+        walk away. The global route stays valid no matter what the dynamic obstacles
+        do; only the <i>local</i>, reactive part of the system needs to respond to
+        them. This is also why the system stays fast: there's no replanning loop
+        running at all, just one forward pass through the nav policy per control
+        step.
+      </div>
+      <div class="why" style="border-left-color:var(--signal)">
+        <b>Why add a risk-prediction head instead of just a bigger collision penalty?</b>
+        A penalty that only fires <i>after</i> a collision teaches the policy
+        "collisions are bad" but gives it no signal about <i>when one is about to
+        happen</i>. A small auxiliary output trained to predict "will I collide in
+        the next N steps" gives an anticipatory signal — the policy can learn to
+        slow down or deflect <i>before</i> contact, not just be punished after. This
+        is a scoped-down version of what Agile But Safe (ABS) does with a full
+        reach-avoid value network; you're getting the same anticipate-and-back-off
+        behavior from a much simpler auxiliary head.
+      </div>
+    </section>
+
+    <section id="p2-arch">
+      <h3>What's added in Phase 02</h3>
+      <div class="legend-row">
+        <span><span class="swatch" style="background:var(--data)"></span>sensing / mapping</span>
+        <span><span class="swatch" style="background:var(--signal)"></span>planning &amp; control</span>
+      </div>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 260" width="700" height="260">
+          <defs>
+            <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="var(--ink-dim)" stroke-width="1.5" stroke-linecap="round"/>
+            </marker>
+          </defs>
+          <rect class="node-box data" x="20" y="20" width="200" height="64" rx="8"/>
+          <text class="node-text" x="120" y="42" text-anchor="middle">occupancy grid</text>
+          <text class="node-sub" x="120" y="58" text-anchor="middle">×3 stacked frames</text>
+          <text class="node-sub" x="120" y="72" text-anchor="middle">(was: single frame)</text>
+
+          <path class="flow-line" d="M220 52 H 270" marker-end="url(#arrow2)"/>
+
+          <rect class="node-box data" x="270" y="20" width="200" height="64" rx="8"/>
+          <text class="node-text" x="370" y="42" text-anchor="middle">CNN encoder</text>
+          <text class="node-sub" x="370" y="58" text-anchor="middle">now reads implicit motion</text>
+          <text class="node-sub" x="370" y="72" text-anchor="middle">from frame-to-frame shift</text>
+
+          <path class="flow-line" d="M470 52 H 520" marker-end="url(#arrow2)"/>
+
+          <rect class="node-box control" x="520" y="20" width="160" height="64" rx="8"/>
+          <text class="node-text" x="600" y="42" text-anchor="middle">nav policy</text>
+          <text class="node-sub" x="600" y="58" text-anchor="middle">+ risk-prediction</text>
+          <text class="node-sub" x="600" y="72" text-anchor="middle">head (new)</text>
+
+          <path class="flow-line" d="M600 84 V 130"/>
+          <rect class="node-box control" x="500" y="130" width="180" height="56" rx="8"/>
+          <text class="node-text" x="590" y="152" text-anchor="middle">P(collision, next N steps)</text>
+          <text class="node-sub" x="590" y="170" text-anchor="middle">shapes reward + optional cmd scale-down</text>
+
+          <rect class="node-box" x="20" y="130" width="380" height="64" rx="8" stroke-dasharray="3 3"/>
+          <text class="node-text" x="210" y="152" text-anchor="middle">2-4 scripted dynamic obstacle assets</text>
+          <text class="node-sub" x="210" y="170" text-anchor="middle">linear back-and-forth or bounded random walk</text>
+          <text class="node-sub" x="210" y="184" text-anchor="middle">no RL, no intelligence — just motion</text>
+
+          <path class="flow-line" d="M210 130 V 105 H 120 V 84" marker-end="url(#arrow2)"/>
+        </svg>
+      </div>
+      <div class="callout p2">
+        <p>Everything from phase 01 (A* planner, the base reward terms, the frozen
+        locomotion policy) stays exactly as it was. The dashed box is new
+        infrastructure that feeds the existing occupancy pipeline; the risk head is
+        a new auxiliary output bolted onto the existing nav policy, not a
+        replacement for it.</p>
+      </div>
+    </section>
+
+    <section id="p2-days">
+      <h3>Day-by-day — Phase 02</h3>
+      <div class="timeline" style="--dotcolor:#ff8c42">
+        <div class="day">
+          <div class="when">Days 1-2</div>
+          <h4 class="daytitle">Scripted dynamic obstacles</h4>
+          <div class="why" style="border-left-color:var(--signal)"><b>Why scripted, not RL-controlled:</b> giving the obstacles their own learned behavior turns this into a much harder multi-agent problem you don't need yet. Simple, predictable scripted motion is enough to force the nav policy to actually react to change, without you having to train a second agent just to get there.</div>
+          <ul class="tasklist">
+            <li>Add 2-4 movable assets to the scene (boxes, simple humanoid placeholders) in the scene config</li>
+            <li>Write the motion script in <span class="file">events.py</span> — bounded random walk or back-and-forth linear motion, reset on episode start</li>
+            <li class="check">Checkpoint: in the GUI, do the obstacles visibly move in a sane, bounded way without flying off or clipping through walls?</li>
+          </ul>
+        </div>
+        <div class="day">
+          <div class="when">Days 3-4</div>
+          <h4 class="daytitle">Frame stacking</h4>
+          <ul class="tasklist">
+            <li>Modify <span class="file">observations.py</span> to maintain a small rolling buffer of the last 3 occupancy grids per environment</li>
+            <li>Stack them as channels before the CNN encoder (shape changes from [1,H,W] to [3,H,W] — update the encoder's first conv layer input channels accordingly)</li>
+            <li class="check">Checkpoint: feed a hand-crafted sequence (obstacle moving left) through the encoder and sanity-check the output changes meaningfully between a moving vs static input — this can be tested standalone before retraining anything.</li>
+          </ul>
+        </div>
+        <div class="day">
+          <div class="when">Days 5-7</div>
+          <h4 class="daytitle">Risk-prediction head + retraining</h4>
+          <div class="why" style="border-left-color:var(--signal)"><b>Why retrain from scratch rather than fine-tune the phase 01 checkpoint:</b> the observation shape changed (single frame → stacked frames), so the old policy's input layer is incompatible. This is expected, not a setback — phase 01's value was proving the pipeline works, not the specific weights.</div>
+          <ul class="tasklist">
+            <li>Add a small auxiliary output head to the policy/critic network predicting collision probability within N steps, in your skrl model definition</li>
+            <li>Add the binary cross-entropy auxiliary loss alongside the PPO loss, and the risk-shaped reward term in <span class="file">rewards.py</span></li>
+            <li>Launch training with dynamic obstacles active</li>
+            <li class="check">Checkpoint: TensorBoard shows the auxiliary risk loss decreasing (the head is learning to predict something) alongside the main reward trending up.</li>
+          </ul>
+        </div>
+        <div class="day">
+          <div class="when">Days 8-9</div>
+          <h4 class="daytitle">Validation</h4>
+          <ul class="tasklist">
+            <li>Run <span class="file">play.py</span> with dynamic obstacles active — does the robot visibly deflect around moving things rather than freezing or colliding?</li>
+            <li>Extend <span class="file">eval_metrics.py</span> with a dynamic-obstacle collision-rate column, compare against the phase 01 static-only baseline</li>
+            <li class="check">Checkpoint, end of phase 02: collision rate with dynamic obstacles is meaningfully better than a policy with no risk head (worth training that ablation briefly, even just for a day, to have a number to compare against).</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="p2-files">
+      <h3>Directory diff — Phase 02</h3>
+      <div class="filetree">
+<span class="dir">neurogait/tasks/navigation/</span>
+├── <span class="existing">navigation_env_cfg.py</span>      <span class="cmt"># edited: add movable obstacle assets to scene</span>
+├── <span class="dir">mdp/</span>
+│   ├── <span class="existing">observations.py</span>        <span class="cmt"># edited: frame-stacking buffer added</span>
+│   ├── <span class="existing">commands.py</span>             <span class="cmt"># unchanged — A* still static-map-only</span>
+│   ├── <span class="existing">rewards.py</span>              <span class="cmt"># edited: + risk-shaped penalty term</span>
+│   ├── <span class="new2">events.py</span>                <span class="cmt"># new — scripted dynamic obstacle motion</span>
+│   └── <span class="existing">terminations.py</span>
+└── <span class="existing">planner.py</span>                 <span class="cmt"># unchanged — still plans over static layout only</span>
+
+<span class="dir">neurogait/agents/</span>
+└── <span class="new2">skrl_nav_ppo_cfg_v2.yaml</span>     <span class="cmt"># new config — input shape changed (stacked frames)</span>
+      </div>
+      <p class="dim" style="font-size:12.5px">Notice how little is new here compared to phase 01 — one new file (<code>events.py</code>), edits to three existing ones, and a new agent config because the observation shape changed. This is what "the stack grows, it doesn't get rebuilt" looks like in practice.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- PHASE 3 -->
+    <!-- ============================================================ -->
+
+    <section id="p3-why" class="topgap" style="--dotcolor:#b9a87c">
+      <div class="phase-pills">
+        <a href="#p1-why">01 static rubble</a>
+        <a href="#p2-why">02 dynamic obstacles</a>
+        <a href="#p3-why" class="cur3">03 multi-objective</a>
+        <a href="#p4-why">04 multi-robot</a>
+      </div>
+      <span class="eyebrow p3">Phase 03 · ~1-2 weeks</span>
+      <h2>Multi-objective optimization</h2>
+      <p>
+        So far there's been one reward, implicitly weighted by whatever numbers you
+        picked. This phase makes that weighting explicit and deliberately varied —
+        the deliverable is a small Pareto front showing the tradeoff between speed,
+        energy, and smoothness, not just one more trained policy.
+      </p>
+      <h4>Why build it this way</h4>
+      <div class="why" style="border-left-color:var(--terrain)">
+        <b>Why decompose the reward instead of just tuning weights once?</b>
+        A single fixed weighting gives you one point in a tradeoff space — you can't
+        say anything about <i>energy versus speed</i> from one number. Logging the
+        four terms (progress, energy, jerk, time) separately, and training a few
+        different weightings, gives you several points you can actually plot against
+        each other. That comparison <i>is</i> the multi-objective result your
+        supervisor asked for.
+      </div>
+      <div class="why" style="border-left-color:var(--terrain)">
+        <b>Why fixed-weight sweeps instead of a single weight-conditioned policy?</b>
+        A weight-conditioned policy (where the reward weights are part of the
+        observation, randomized during training) is the more elegant solution — one
+        policy, queryable at any tradeoff point. It's also roughly double the
+        complexity: you need a weight-sampling curriculum and a conditioning
+        architecture, and it's much harder to debug if something's off, since you
+        can't easily tell whether a bad result is a training bug or just an
+        under-sampled weight region. Fixed-weight sweeps are slower in wall-clock GPU
+        time but far easier to reason about — get this working first, treat the
+        conditioned version as a stretch goal only if time remains.
+      </div>
+      <div class="why" style="border-left-color:var(--terrain)">
+        <b>Why is energy "free" to compute?</b>
+        Your frozen locomotion policy already computes 12 joint torques every step
+        to walk — that's its whole job. Energy is just <code>Σ|torque × joint
+        velocity|</code> summed over the 12 joints and over time. You're not
+        computing anything new, just reading and logging a number that already
+        exists inside the simulation step.
+      </div>
+    </section>
+
+    <section id="p3-arch">
+      <h3>What's added in Phase 03</h3>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 280" width="700" height="280">
+          <defs>
+            <marker id="arrow3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="var(--ink-dim)" stroke-width="1.5" stroke-linecap="round"/>
+            </marker>
+          </defs>
+          <rect class="node-box control" x="20" y="20" width="200" height="56" rx="8"/>
+          <text class="node-text" x="120" y="42" text-anchor="middle">nav policy (phase 02)</text>
+          <text class="node-sub" x="120" y="60" text-anchor="middle">single scalar reward</text>
+
+          <path class="flow-line" d="M220 48 H 270" marker-end="url(#arrow3)"/>
+
+          <rect class="node-box" x="270" y="10" width="180" height="40" rx="8"/>
+          <text class="node-text" x="360" y="30" text-anchor="middle">progress term</text>
+          <rect class="node-box" x="270" y="58" width="180" height="40" rx="8"/>
+          <text class="node-text" x="360" y="78" text-anchor="middle">energy term</text>
+          <rect class="node-box" x="270" y="106" width="180" height="40" rx="8"/>
+          <text class="node-text" x="360" y="126" text-anchor="middle">jerk term</text>
+          <rect class="node-box" x="270" y="154" width="180" height="40" rx="8"/>
+          <text class="node-text" x="360" y="174" text-anchor="middle">time term</text>
+
+          <path class="flow-line" d="M450 30 H 500" marker-end="url(#arrow3)"/>
+          <path class="flow-line" d="M450 78 H 500" marker-end="url(#arrow3)"/>
+          <path class="flow-line" d="M450 126 H 500" marker-end="url(#arrow3)"/>
+          <path class="flow-line" d="M450 174 H 500" marker-end="url(#arrow3)"/>
+
+          <rect class="node-box" x="500" y="10" width="180" height="184" rx="8" stroke-dasharray="3 3"/>
+          <text class="node-text" x="590" y="40" text-anchor="middle">weight set A</text>
+          <text class="node-sub" x="590" y="58" text-anchor="middle">→ trained policy A</text>
+          <text class="node-text" x="590" y="90" text-anchor="middle">weight set B</text>
+          <text class="node-sub" x="590" y="108" text-anchor="middle">→ trained policy B</text>
+          <text class="node-text" x="590" y="140" text-anchor="middle">weight set C</text>
+          <text class="node-sub" x="590" y="158" text-anchor="middle">→ trained policy C</text>
+          <text class="node-sub" x="590" y="180" text-anchor="middle">(3-5 sets total)</text>
+
+          <rect class="node-box" x="220" y="220" width="280" height="44" rx="8"/>
+          <text class="node-text" x="360" y="242" text-anchor="middle">Pareto front = plot all policies' logged</text>
+          <text class="node-sub" x="360" y="256" text-anchor="middle">metrics against each other</text>
+        </svg>
+      </div>
+      <div class="callout p3">
+        <p>The policy architecture itself (CNN + MLP, action output) is identical to
+        phase 02 — only the reward function and the training config change, run
+        multiple times with different weight files. No new network code is strictly
+        required for the fixed-weight version.</p>
+      </div>
+    </section>
+
+    <section id="p3-days">
+      <h3>Day-by-day — Phase 03</h3>
+      <div class="timeline" style="--dotcolor:#b9a87c">
+        <div class="day">
+          <div class="when">Days 1-2</div>
+          <h4 class="daytitle">Decompose and instrument the reward</h4>
+          <ul class="tasklist">
+            <li>Split the existing reward in <span class="file">rewards.py</span> into four named functions: progress, energy, jerk, time — each returning its own scalar</li>
+            <li>Log each one separately to TensorBoard (in addition to the weighted sum) — this is the single most important habit this phase, since it's what makes the Friday-morning comparison possible</li>
+            <li>Move the weight values out of the reward functions and into the agent config file, so changing weights doesn't require touching code</li>
+            <li class="check">Checkpoint: re-run a short training session with your phase-02 weights and confirm the four logged curves sum to (approximately) the original combined reward curve — this validates the decomposition didn't change behavior.</li>
+          </ul>
+        </div>
+        <div class="day">
+          <div class="when">Days 3-7</div>
+          <h4 class="daytitle">Train the weight sweep</h4>
+          <div class="why" style="border-left-color:var(--terrain)"><b>Why this is mostly waiting, not coding:</b> each weight configuration is a full training run. If one run takes a day or so to reach a reasonable policy, three to five configs is the bulk of this phase's calendar time — plan other work (writing up phase 1-2 results, preparing the eval script) to run in parallel rather than sitting and watching TensorBoard.</div>
+          <ul class="tasklist">
+            <li>Define 3-5 weight configurations: e.g. "speed-prioritized," "energy-prioritized," "balanced," "smoothness-prioritized"</li>
+            <li>Launch each as a separate training run, saving checkpoints with names that track which weight set produced them</li>
+            <li class="check">Checkpoint per run: reward curves for all four logged terms look sane (none flatlined at zero, none exploding) within the first hour — catch a bad config early rather than discovering it after a full overnight run.</li>
+          </ul>
+        </div>
+        <div class="day">
+          <div class="when">Days 8-10</div>
+          <h4 class="daytitle">Evaluate and plot</h4>
+          <ul class="tasklist">
+            <li>Run <span class="file">eval_metrics.py</span> on each of the 3-5 trained checkpoints, same N episodes, same scene, for a fair comparison</li>
+            <li>Plot the resulting metrics against each other (e.g. energy vs. time-to-goal) — each trained policy is one point</li>
+            <li class="check">Checkpoint, end of phase 03: a plot showing a visible tradeoff — e.g. the energy-prioritized policy is slower but uses less power than the speed-prioritized one. That tradeoff existing and being demonstrable is the actual deliverable.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="p3-files">
+      <h3>Directory diff — Phase 03</h3>
+      <div class="filetree">
+<span class="dir">neurogait/tasks/navigation/mdp/</span>
+└── <span class="existing">rewards.py</span>     <span class="cmt"># edited: split into 4 named functions, weights externalized</span>
+
+<span class="dir">neurogait/agents/</span>
+├── <span class="existing">skrl_nav_ppo_cfg_v2.yaml</span>
+├── <span class="new3">weights_speed.yaml</span>          <span class="cmt"># new — weight set A</span>
+├── <span class="new3">weights_energy.yaml</span>         <span class="cmt"># new — weight set B</span>
+├── <span class="new3">weights_balanced.yaml</span>       <span class="cmt"># new — weight set C</span>
+└── <span class="new3">weights_smooth.yaml</span>         <span class="cmt"># new — weight set D (if time allows)</span>
+
+<span class="dir">neurogait/scripts/</span>
+├── <span class="existing">eval_metrics.py</span>          <span class="cmt"># edited: outputs all 4 metric columns per episode</span>
+└── <span class="new3">plot_pareto.py</span>             <span class="cmt"># new — reads multiple eval CSVs, plots tradeoff</span>
+
+<span class="dir">checkpoints/navigation/</span>
+├── <span class="new3">policy_speed.pt</span>
+├── <span class="new3">policy_energy.pt</span>
+└── <span class="new3">policy_balanced.pt</span>
+      </div>
+      <p class="dim" style="font-size:12.5px">No changes to the environment, observations, or planner at all this phase — purely reward decomposition and running the same training multiple times with different weight files.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- PHASE 4 -->
+    <!-- ============================================================ -->
+
+    <section id="p4-why" class="topgap" style="--dotcolor:#c792ea">
+      <div class="phase-pills">
+        <a href="#p1-why">01 static rubble</a>
+        <a href="#p2-why">02 dynamic obstacles</a>
+        <a href="#p3-why">03 multi-objective</a>
+        <a href="#p4-why" class="cur4">04 multi-robot</a>
+      </div>
+      <span class="eyebrow p4">Phase 04 · ~2+ weeks, research frontier</span>
+      <h2>Multi-robot communication</h2>
+      <p>
+        Multiple Go2s share the scene, each running the full phase 1-3 stack
+        independently, with one addition: they exchange small learned messages
+        about what they see and where they're headed. This is explicitly the
+        thesis-frontier part of the project — staged so even a partial result is a
+        real, demonstrable finding.
+      </p>
+      <h4>Why build it this way</h4>
+      <div class="why" style="border-left-color:var(--comm)">
+        <b>Why start with a no-communication baseline (parameter sharing) before adding messaging?</b>
+        "Multiple robots in one scene, each running an independent copy of the same
+        policy" is almost free to get working — it's mechanically just instantiating
+        your phase 1-3 pipeline more than once. It's also a legitimate scientific
+        baseline: if you later show robots <i>with</i> communication do better than
+        this, that comparison is your actual contribution. Skipping straight to the
+        communication channel means you can't isolate whether it helped.
+      </div>
+      <div class="why" style="border-left-color:var(--comm)">
+        <b>Why a graph neural network for the communication channel?</b>
+        Each robot is naturally a node, and "robots within range can hear each
+        other" is naturally a graph edge. A GNN (or even simple attention over
+        neighbor messages) is built for exactly this: aggregating a variable number
+        of neighbor inputs into one fixed-size vector, which is then just one more
+        thing concatenated into the existing nav policy's observation. This is the
+        architecture used across current decentralized multi-robot navigation
+        research — robots compute a compact message about their local state, send
+        it to neighbors, and an aggregation layer folds incoming messages into each
+        robot's own decision.
+      </div>
+      <div class="why" style="border-left-color:var(--comm)">
+        <b>Why skrl might not be enough here, on its own?</b>
+        skrl's PPO/SAC/TD3 trainers are built around the assumption of one agent
+        learning in one environment. Multiple robots that need to exchange
+        information mid-episode is a genuinely different training loop — this is
+        where you may need either Isaac Lab's newer multi-agent extensions or a
+        custom wrapper, which is part of why this phase is scoped as "even reaching
+        step 1 is a meaningful result," not "fully match the literature."
+      </div>
+    </section>
+
+    <section id="p4-arch">
+      <h3>What's added in Phase 04</h3>
+      <div class="legend-row">
+        <span><span class="swatch" style="background:var(--comm)"></span>inter-robot communication</span>
+      </div>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 320" width="700" height="320">
+          <defs>
+            <marker id="arrow4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="var(--comm)" stroke-width="1.5" stroke-linecap="round"/>
+            </marker>
+          </defs>
+
+          <rect class="node-box control" x="20" y="20" width="190" height="80" rx="8"/>
+          <text class="node-text" x="115" y="42" text-anchor="middle">robot A</text>
+          <text class="node-sub" x="115" y="60" text-anchor="middle">own cost map + state</text>
+          <text class="node-sub" x="115" y="74" text-anchor="middle">→ message embedding</text>
+          <text class="node-sub" x="115" y="88" text-anchor="middle">(small encoder)</text>
+
+          <rect class="node-box control" x="255" y="20" width="190" height="80" rx="8"/>
+          <text class="node-text" x="350" y="42" text-anchor="middle">robot B</text>
+          <text class="node-sub" x="350" y="60" text-anchor="middle">own cost map + state</text>
+          <text class="node-sub" x="350" y="74" text-anchor="middle">→ message embedding</text>
+          <text class="node-sub" x="350" y="88" text-anchor="middle">(small encoder)</text>
+
+          <rect class="node-box control" x="490" y="20" width="190" height="80" rx="8"/>
+          <text class="node-text" x="585" y="42" text-anchor="middle">robot C</text>
+          <text class="node-sub" x="585" y="60" text-anchor="middle">own cost map + state</text>
+          <text class="node-sub" x="585" y="74" text-anchor="middle">→ message embedding</text>
+          <text class="node-sub" x="585" y="88" text-anchor="middle">(small encoder)</text>
+
+          <path class="flow-line comm" d="M210 60 H 255" marker-end="url(#arrow4)"/>
+          <path class="flow-line comm" d="M255 80 H 210" marker-end="url(#arrow4)"/>
+          <path class="flow-line comm" d="M445 60 H 490" marker-end="url(#arrow4)"/>
+          <path class="flow-line comm" d="M490 80 H 445" marker-end="url(#arrow4)"/>
+
+          <text class="flow-label" x="232" y="50" text-anchor="middle" fill="var(--comm)">⇄ msg</text>
+          <text class="flow-label" x="467" y="50" text-anchor="middle" fill="var(--comm)">⇄ msg</text>
+
+          <path class="flow-line" d="M115 100 V 140"/>
+          <path class="flow-line" d="M350 100 V 140"/>
+          <path class="flow-line" d="M585 100 V 140"/>
+
+          <rect class="node-box comm" x="20" y="140" width="660" height="60" rx="8"/>
+          <text class="node-text" x="350" y="165" text-anchor="middle">graph attention layer — aggregates each robot's neighbor messages</text>
+          <text class="node-sub" x="350" y="183" text-anchor="middle">output: one aggregated vector per robot, appended to its own observation</text>
+
+          <path class="flow-line" d="M115 200 V 240"/>
+          <path class="flow-line" d="M350 200 V 240"/>
+          <path class="flow-line" d="M585 200 V 240"/>
+
+          <rect class="node-box control" x="20" y="240" width="190" height="50" rx="8"/>
+          <text class="node-text" x="115" y="260" text-anchor="middle">nav policy A</text>
+          <text class="node-sub" x="115" y="276" text-anchor="middle">(phases 1-3, + neighbor input)</text>
+
+          <rect class="node-box control" x="255" y="240" width="190" height="50" rx="8"/>
+          <text class="node-text" x="350" y="260" text-anchor="middle">nav policy B</text>
+          <text class="node-sub" x="350" y="276" text-anchor="middle">(phases 1-3, + neighbor input)</text>
+
+          <rect class="node-box control" x="490" y="240" width="190" height="50" rx="8"/>
+          <text class="node-text" x="585" y="260" text-anchor="middle">nav policy C</text>
+          <text class="node-sub" x="585" y="276" text-anchor="middle">(phases 1-3, + neighbor input)</text>
+        </svg>
+      </div>
+      <div class="callout p4">
+        <p>Each "nav policy" box at the bottom is the exact same architecture from
+        phases 01-03 — same CNN encoder, same reward terms, same frozen locomotion
+        underneath. The only new input is the aggregated neighbor vector. This is
+        why a staged build (parameter-sharing first) is realistic: stages 1-3 of
+        this phase don't touch that bottom row at all.</p>
+      </div>
+    </section>
+
+    <section id="p4-days">
+      <h3>Staged plan — Phase 04</h3>
+      <p class="dim" style="font-size:13px">This phase is "day-by-day" in a looser sense than 01-03, since it's genuinely open-ended research work. Treat these as stages, each gated on the previous one actually working.</p>
+      <div class="timeline" style="--dotcolor:#c792ea">
+        <div class="day">
+          <div class="when">Stage A — ~3-4 days</div>
+          <h4 class="daytitle">Parameter-sharing baseline, no communication</h4>
+          <ul class="tasklist">
+            <li>Instantiate 2-3 Go2s in the same scene, each running an independent copy of your phase 01-03 nav policy (same weights, separate observations)</li>
+            <li>Verify they don't interfere with each other's physics/collision in ways that break locomotion</li>
+            <li class="check">Checkpoint: multiple robots each independently navigate toward their own goals, ignoring each other except for incidental collision avoidance via the existing obstacle-occupancy term (they'd appear in each other's occupancy grids as just another obstacle, with zero extra code).</li>
+          </ul>
+        </div>
+        <div class="day">
+          <div class="when">Stage B — ~1 week</div>
+          <h4 class="daytitle">Add the message-passing wrapper</h4>
+          <ul class="tasklist">
+            <li>Decide on the multi-agent training infrastructure: check Isaac Lab's current multi-agent support, or build a thin custom wrapper around your existing single-agent env if needed</li>
+            <li>Add a small encoder that compresses each robot's cost-map + state into a fixed-size message vector</li>
+            <li>Implement neighbor-range logic (which robots can "hear" which) and a basic aggregation (even a simple average of neighbor messages before attempting full graph attention)</li>
+            <li class="check">Checkpoint: each robot's observation now includes a non-trivial aggregated neighbor vector that changes when neighbors move — verify this mechanically before training anything new.</li>
+          </ul>
+        </div>
+        <div class="day">
+          <div class="when">Stage C — ~1+ week, stretch</div>
+          <h4 class="daytitle">Train and compare against the baseline</h4>
+          <ul class="tasklist">
+            <li>Train the communication-enabled policy</li>
+            <li>Compare against Stage A's baseline on the same metrics from phase 03 (time, energy, jerk) plus any multi-robot-specific metric (e.g. did they avoid redundant coverage, or coordinate around a shared obstacle)</li>
+            <li class="check">This is genuinely a "thesis chapter," not a guaranteed week's output — reaching Stage A alone, with Stage B as documented future work, is still a legitimate result.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="p4-files">
+      <h3>Directory diff — Phase 04</h3>
+      <div class="filetree">
+<span class="dir">neurogait/tasks/</span>
+└── <span class="dir new4">navigation_multi/</span>           <span class="cmt"># new — kept separate from single-robot task</span>
+    ├── <span class="new4">__init__.py</span>             <span class="cmt"># registers NeuroGait-Navigation-MultiRubble-v0</span>
+    ├── <span class="new4">multi_env_cfg.py</span>         <span class="cmt"># N robots in one scene, reuses navigation/mdp/* terms</span>
+    └── <span class="dir new4">mdp/</span>
+        ├── <span class="new4">comms.py</span>             <span class="cmt"># message encoder + neighbor aggregation</span>
+        └── <span class="existing">(imports navigation/mdp/observations.py, rewards.py, etc. — reused, not duplicated)</span>
+
+<span class="dir">neurogait/agents/</span>
+└── <span class="new4">skrl_nav_multiagent_cfg.yaml</span>  <span class="cmt"># new — multi-agent training config (or custom wrapper config)</span>
+
+<span class="dir">checkpoints/</span>
+└── <span class="dir new4">navigation_multi/</span>           <span class="cmt"># new checkpoints — separate from single-robot ones</span>
+      </div>
+      <p class="dim" style="font-size:12.5px">Note this is a new task directory, not a modification of <code>navigation/</code> — keeping single-robot and multi-robot as separate registered tasks means phase 01-03's results stay reproducible and untouched no matter what happens here.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- REFERENCE -->
+    <!-- ============================================================ -->
+
+    <section id="final-tree" class="topgap">
+      <span class="eyebrow">Reference</span>
+      <h2>Final directory tree, all four phases</h2>
+      <div class="filetree">
+<span class="dir">neurogait/</span>
+├── <span class="dir">tasks/</span>
+│   ├── <span class="dir">locomotion/</span>                  <span class="cmt"># frozen, untouched throughout</span>
+│   │   └── <span class="existing">velocity_rough_env_cfg.py</span>
+│   │
+│   ├── <span class="dir">navigation/</span>                  <span class="cmt"># phases 01-03 live here, growing in place</span>
+│   │   ├── <span class="new1">__init__.py</span>
+│   │   ├── <span class="new1">navigation_env_cfg.py</span>
+│   │   ├── <span class="dir">mdp/</span>
+│   │   │   ├── <span class="new1">observations.py</span>     <span class="cmt"># P1: occupancy. P2: + frame stack</span>
+│   │   │   ├── <span class="new1">commands.py</span>          <span class="cmt"># P1: A* waypoint</span>
+│   │   │   ├── <span class="new1">rewards.py</span>           <span class="cmt"># P1: base terms. P2: +risk. P3: decomposed</span>
+│   │   │   ├── <span class="new2">events.py</span>           <span class="cmt"># P2: scripted dynamic obstacles</span>
+│   │   │   └── <span class="new1">terminations.py</span>
+│   │   └── <span class="new1">planner.py</span>
+│   │
+│   └── <span class="dir new4">navigation_multi/</span>            <span class="cmt"># P4 only — separate task, reuses navigation/mdp/*</span>
+│       ├── <span class="new4">__init__.py</span>
+│       ├── <span class="new4">multi_env_cfg.py</span>
+│       └── <span class="dir">mdp/</span>
+│           └── <span class="new4">comms.py</span>
+│
+├── <span class="dir">agents/</span>
+│   ├── <span class="existing">skrl_rough_ppo_cfg_v2.yaml</span>      <span class="cmt"># locomotion (frozen)</span>
+│   ├── <span class="new1">skrl_nav_ppo_cfg.yaml</span>           <span class="cmt"># P1</span>
+│   ├── <span class="new2">skrl_nav_ppo_cfg_v2.yaml</span>        <span class="cmt"># P2 (input shape changed)</span>
+│   ├── <span class="new3">weights_speed.yaml</span>             <span class="cmt"># P3</span>
+│   ├── <span class="new3">weights_energy.yaml</span>            <span class="cmt"># P3</span>
+│   ├── <span class="new3">weights_balanced.yaml</span>          <span class="cmt"># P3</span>
+│   └── <span class="new4">skrl_nav_multiagent_cfg.yaml</span>   <span class="cmt"># P4</span>
+│
+└── <span class="dir">scripts/</span>
+    ├── <span class="existing">list_envs.py</span>
+    ├── <span class="existing">play.py</span>
+    ├── <span class="new1">eval_metrics.py</span>             <span class="cmt"># P1, extended in P2/P3</span>
+    └── <span class="new3">plot_pareto.py</span>              <span class="cmt"># P3</span>
+
+<span class="dir">checkpoints/</span>
+├── <span class="existing">locomotion/agent_32000.pt</span>
+├── <span class="dir">navigation/</span>
+│   ├── <span class="new1">policy_p1.pt</span>
+│   ├── <span class="new2">policy_p2.pt</span>
+│   ├── <span class="new3">policy_speed.pt</span>
+│   ├── <span class="new3">policy_energy.pt</span>
+│   └── <span class="new3">policy_balanced.pt</span>
+└── <span class="dir new4">navigation_multi/</span>
+      </div>
+      <div class="legend-row">
+        <span><span class="swatch" style="background:var(--data)"></span>added phase 01</span>
+        <span><span class="swatch" style="background:var(--signal)"></span>added phase 02</span>
+        <span><span class="swatch" style="background:var(--terrain)"></span>added phase 03</span>
+        <span><span class="swatch" style="background:var(--comm)"></span>added phase 04</span>
+        <span><span class="swatch" style="background:var(--ink-dim)"></span>existing, untouched</span>
+      </div>
+    </section>
+
+    <section id="timeline-summary">
+      <h3>Full timeline summary</h3>
+      <table>
+        <tr><th>Phase</th><th>Realistic duration</th><th>Core deliverable</th></tr>
+        <tr><td>01 — static rubble</td><td class="mono">1.5–2 weeks</td><td>Single robot, real vision, reaches goals through static rubble</td></tr>
+        <tr><td>02 — dynamic obstacles</td><td class="mono">1–1.5 weeks</td><td>Reacts to moving obstacles without replanning</td></tr>
+        <tr><td>03 — multi-objective</td><td class="mono">1–2 weeks</td><td>Pareto front across energy / speed / jerk</td></tr>
+        <tr><td>04 — multi-robot comms</td><td class="mono">2+ weeks</td><td>Parameter-sharing baseline guaranteed; comm channel as stretch</td></tr>
+      </table>
+      <p class="dim" style="font-size:13px">Total: roughly 6-8 weeks for all four phases done properly, back to back, assuming no major unplanned blockers. That's a realistic full-thesis-arc estimate, not a worst case — treat it as the number to plan against, and renegotiate scope with your supervisor early if the calendar doesn't allow it, rather than discovering the gap in week 7.</p>
+    </section>
+
+    <section id="metrics-ref">
+      <h3>Metrics reference (used from Phase 03 onward)</h3>
+      <div class="metrics">
+        <div class="metric">
+          <div class="m-name">Time-to-goal</div>
+          <span class="m-formula">steps × dt</span>
+          <p>Episode length until goal-reached termination fires.</p>
+        </div>
+        <div class="metric">
+          <div class="m-name">Energy</div>
+          <span class="m-formula">Σ_t Σ_i |τ_i,t · ω_i,t|</span>
+          <p>Summed over all 12 joints and all timesteps. Read from the frozen locomotion policy's internal state.</p>
+        </div>
+        <div class="metric">
+          <div class="m-name">Jerk</div>
+          <span class="m-formula">mean_t ‖cmd_t − cmd_{t−1}‖</span>
+          <p>Mean step-to-step change in the nav policy's velocity command.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>NEUROGAIT · FULL STACK FIELD SHEET · GO2 / ISAAC LAB 2.3 / SKRL PPO</footer>
+
+  </main>
+</div>
+<script>
+  const links = document.querySelectorAll('#toc a');
+  const sections = [...links].map(l => document.querySelector(l.getAttribute('href'))).filter(Boolean);
+  function onScroll(){
+    let current = sections[0];
+    const y = window.scrollY + 100;
+    sections.forEach(s => { if (s && s.offsetTop <= y) current = s; });
+    links.forEach(l => l.classList.toggle('active', current && l.getAttribute('href') === '#' + current.id));
+  }
+  document.addEventListener('scroll', onScroll);
+  onScroll();
+</script>
+</body>
+</html>
