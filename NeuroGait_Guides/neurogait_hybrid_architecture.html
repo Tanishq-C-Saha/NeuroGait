@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NeuroGait — Hybrid Navigation Architecture: TOP-Nav + ABS + Learned Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#15181b; --panel:#1d2126; --panel-2:#252a31;
+    --ink:#ece7dc; --ink-dim:#9aa0a6;
+    --line:rgba(236,231,220,0.10); --line-strong:rgba(236,231,220,0.20);
+    --topnav:#5fd0c9; --abs:#ff8c42; --ours:#c792ea; --classical:#b9a87c; --warn:#e2533a;
+    --font-display:'Space Grotesk',sans-serif;
+    --font-body:'Inter',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{ background:var(--bg); color:var(--ink); font-family:var(--font-body); line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .shell{ display:flex; min-height:100vh; }
+  .rail{ flex:0 0 250px; border-right:1px solid var(--line); background:var(--panel); padding:26px 16px; position:sticky; top:0; height:100vh; overflow-y:auto; }
+  .rail .brand{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; color:var(--ours); margin-bottom:4px; }
+  .rail h1{ font-family:var(--font-display); font-size:16.5px; margin:0 0 20px; font-weight:600; line-height:1.3; }
+  .rail nav a{ display:block; font-family:var(--font-mono); font-size:11px; color:var(--ink-dim); text-decoration:none; padding:6px 0; border-left:2px solid transparent; padding-left:10px; margin-left:-10px; transition:color .15s, border-color .15s; }
+  .rail nav a:hover, .rail nav a.active{ color:var(--ink); border-color:var(--ours); }
+  .rail .sectag{ display:block; font-size:9px; color:var(--ink-dim); opacity:.75; margin:14px 0 3px 0; text-transform:uppercase; letter-spacing:.12em; }
+  .content{ flex:1; min-width:0; padding:46px 54px 130px; max-width:920px; }
+  @media(max-width:900px){ .rail{ display:none; } .content{ padding:30px 18px 100px; } }
+  section{ margin-bottom:58px; scroll-margin-top:24px; }
+  .eyebrow{ font-family:var(--font-mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--ours); }
+  h2{ font-family:var(--font-display); font-size:clamp(21px,3vw,28px); font-weight:600; margin:8px 0 16px; letter-spacing:-0.01em; }
+  h3{ font-family:var(--font-display); font-size:16px; font-weight:600; margin:26px 0 10px; }
+  h4{ font-family:var(--font-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-dim); margin:18px 0 8px; }
+  p{ font-size:14px; color:var(--ink); margin:0 0 12px; }
+  .dim{ color:var(--ink-dim); }
+  code, .mono{ font-family:var(--font-mono); font-size:0.92em; }
+  code{ background:var(--panel-2); padding:1px 5px; border-radius:4px; }
+  .banner{ border:1px solid var(--line-strong); background:var(--panel); border-radius:10px; padding:16px 18px; margin-bottom:10px; }
+  .banner p{ margin:8px 0 0; }
+  .banner.warn{ border-color:var(--warn); background:rgba(226,83,58,0.07); }
+  .banner.warn .eyebrow{ color:var(--warn); }
+
+  .source-row{ display:flex; gap:10px; margin:14px 0; flex-wrap:wrap; }
+  .source-pill{ font-family:var(--font-mono); font-size:11px; border-radius:20px; padding:6px 14px; border:1px solid var(--line-strong); }
+  .source-pill.topnav{ border-color:var(--topnav); color:var(--topnav); }
+  .source-pill.abs{ border-color:var(--abs); color:var(--abs); }
+  .source-pill.ours{ border-color:var(--ours); color:var(--ours); }
+  .source-pill.classical{ border-color:var(--classical); color:var(--classical); }
+
+  .legend-row{ display:flex; gap:16px; flex-wrap:wrap; margin:10px 0 18px; font-family:var(--font-mono); font-size:11px; color:var(--ink-dim); }
+  .legend-row .swatch{ display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; vertical-align:middle; }
+
+  .diagram-wrap{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px; overflow-x:auto; margin:16px 0; }
+  .diagram-wrap svg{ display:block; min-width:600px; }
+  .node-box{ fill:var(--panel-2); stroke:var(--line-strong); stroke-width:1; }
+  .node-text{ font-family:'JetBrains Mono',monospace; fill:var(--ink); font-size:11px; }
+  .node-sub{ font-family:'Inter',sans-serif; fill:var(--ink-dim); font-size:9.5px; }
+  .flow-line{ stroke:var(--ink-dim); stroke-width:1.4; fill:none; }
+  .flow-line.feedback{ stroke:var(--topnav); stroke-dasharray:4 3; }
+  .flow-line.switch{ stroke:var(--abs); stroke-dasharray:3 2; }
+
+  .why{ font-size:13px; color:var(--ink-dim); margin:0 0 10px; padding:10px 14px; background:var(--panel-2); border-radius:8px; border-left:2px solid var(--ours); }
+  .why b{ color:var(--ink); }
+  .why.topnav{ border-left-color:var(--topnav); }
+  .why.abs{ border-left-color:var(--abs); }
+  .why.classical{ border-left-color:var(--classical); }
+
+  .readguide{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin:14px 0; }
+  .readguide h4{ margin-top:0; }
+  .readguide ol{ margin:0; padding-left:20px; }
+  .readguide li{ font-size:13px; margin-bottom:10px; color:var(--ink); }
+  .readguide li b{ color:var(--ours); }
+  .readguide li .target{ display:block; font-size:12px; color:var(--ink-dim); margin-top:3px; }
+
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; margin:14px 0; }
+  th,td{ text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-dim); }
+  td.mono{ font-family:var(--font-mono); font-size:11px; }
+
+  .compare-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin:14px 0; }
+  @media(max-width:760px){ .compare-grid{ grid-template-columns:1fr; } }
+  .compare-card{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .compare-card.topnav{ border-top:3px solid var(--topnav); }
+  .compare-card.abs{ border-top:3px solid var(--abs); }
+  .compare-card.ours{ border-top:3px solid var(--ours); }
+  .compare-card h5{ font-family:var(--font-display); font-size:14px; margin:0 0 8px; font-weight:600; }
+  .compare-card ul{ margin:0; padding-left:18px; }
+  .compare-card li{ font-size:12px; color:var(--ink-dim); margin-bottom:5px; }
+
+  .callout{ border-left:3px solid var(--ours); padding:4px 0 4px 16px; margin:14px 0; }
+  .callout p{ color:var(--ink-dim); font-size:13px; }
+
+  .pitch-box{ background:var(--panel-2); border:1px solid var(--line-strong); border-radius:10px; padding:18px 20px; margin:16px 0; }
+  .pitch-box .eyebrow{ color:var(--ours); }
+  .pitch-box p{ font-style:italic; font-size:14px; }
+
+  footer{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-dim); padding-top:18px; border-top:1px solid var(--line); }
+  .topgap{ scroll-margin-top:80px; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="rail">
+    <div class="brand">NEUROGAIT // HYBRID ARCHITECTURE</div>
+    <h1>Frozen locomotion + learned terrain cost + dual policy + closed-loop correction</h1>
+    <nav id="toc">
+      <a href="#intro">Why a hybrid design</a>
+      <a href="#building-blocks">What each source contributes</a>
+      <span class="sectag">Read before building</span>
+      <a href="#topnav-guide">TOP-Nav reading guide</a>
+      <a href="#abs-guide">ABS reading guide</a>
+      <span class="sectag">Architecture</span>
+      <a href="#full-arch">Full system diagram</a>
+      <a href="#layer1">Layer 1 — global route</a>
+      <a href="#layer2">Layer 2 — dual policy</a>
+      <a href="#layer3">Layer 3 — feedback loop</a>
+      <span class="sectag">Comparison</span>
+      <a href="#vs-table">Vs. each source paper</a>
+      <a href="#novelty">What's actually novel here</a>
+      <span class="sectag">Practical</span>
+      <a href="#build-order">Recommended build order</a>
+      <a href="#pitch">One-paragraph supervisor pitch</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+
+    <section id="intro" class="topgap">
+      <span class="eyebrow">Why a hybrid design</span>
+      <h2>Combining TOP-Nav, ABS, and a learned navigation policy</h2>
+      <p>
+        Your supervisor wants RL genuinely present in the navigation layer, not just
+        in locomotion underneath it. TOP-Nav alone doesn't satisfy that — its
+        navigation decision is a classical planner, full stop, no learned policy
+        anywhere above locomotion. ABS does have RL in navigation, but its dual
+        agile/recovery policy structure is built for a narrower problem (collision
+        avoidance via switching), without TOP-Nav's terrain-awareness or its
+        closed-loop correction idea.
+      </p>
+      <p>
+        The design below takes the structural idea each paper is built around —
+        not the whole paper — and combines exactly three of them into one system.
+        Nothing here is invented from nothing; every piece traces to a specific
+        paper, and the prose says explicitly which piece comes from where so you
+        can defend each design choice individually if asked.
+      </p>
+      <div class="banner warn">
+        <span class="eyebrow">Be honest about scope</span>
+        <p>
+          This is a real increase in complexity over your current single-policy
+          design — two navigation policies instead of one, plus the switching logic
+          between them. Read this whole document before deciding to build it; the
+          recommended build order section at the end argues for getting your
+          existing single-policy version working first, then evolving into this.
+        </p>
+      </div>
+    </section>
+
+    <section id="building-blocks">
+      <h3>What each source contributes — and what it doesn't</h3>
+      <div class="source-row">
+        <span class="source-pill classical">A* — classical, kept as-is</span>
+        <span class="source-pill topnav">TOP-Nav — terrain cost + feedback loop</span>
+        <span class="source-pill abs">ABS — dual policy switching idea</span>
+        <span class="source-pill ours">Your nav policy — RL, kept and split</span>
+      </div>
+      <div class="compare-grid">
+        <div class="compare-card topnav">
+          <h5>From TOP-Nav</h5>
+          <ul>
+            <li>Terrain estimator producing a learned traversability cost, not hand-coded</li>
+            <li>The closed feedback loop: locomotion's own experience corrects the cost map</li>
+          </ul>
+          <ul style="margin-top:8px; border-top:1px solid var(--line); padding-top:8px;">
+            <li class="dim">NOT taking: their lack of a learned navigation policy — your system has one, theirs doesn't</li>
+          </ul>
+        </div>
+        <div class="compare-card abs">
+          <h5>From ABS</h5>
+          <ul>
+            <li>The core idea: specialize policies by objective (progress vs. caution) rather than one policy doing both</li>
+            <li>Anticipatory risk signal driving the switch, not a reactive penalty</li>
+          </ul>
+          <ul style="margin-top:8px; border-top:1px solid var(--line); padding-top:8px;">
+            <li class="dim">NOT taking: their full separate reach-avoid value network — replaced with your existing risk-prediction head, cheaper to train</li>
+          </ul>
+        </div>
+        <div class="compare-card ours">
+          <h5>Kept from your design</h5>
+          <ul>
+            <li>Frozen locomotion policy underneath everything, unchanged</li>
+            <li>A* for the static global route — still classical, still free</li>
+            <li>skrl PPO as the training backbone for both navigation policies</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="topnav-guide" class="topgap">
+      <span class="eyebrow">Read before building</span>
+      <h2>TOP-Nav reading guide — what to actually extract</h2>
+      <p>
+        You don't need every section equally. Here's what each part of the paper
+        maps to in this architecture, in the order to read them.
+      </p>
+      <div class="readguide">
+        <h4>Read in this order</h4>
+        <ol>
+          <li><b>Figure 1 and the system diagram (likely Figure 2 or 3)</b> — get the overall shape before reading any equations.
+            <span class="target">Maps to: the overall three-layer shape of this document's architecture.</span>
+          </li>
+          <li><b>The terrain estimator section</b> — how do they build the traversability cost from sensor input? What's the network architecture, what's the training signal?
+            <span class="target">Maps to: Layer 1 below — this is what makes your A*'s cost map "learned" instead of hand-coded.</span>
+          </li>
+          <li><b>Equations 1-2 (the asymmetric actor-critic), which you've already read</b> — confirm you understand what <code>c_t</code> is and why it can encode privileged information.
+            <span class="target">Maps to: the input to Layer 3's feedback correction — whether you use a real <code>c_t</code> or your simplified proxy.</span>
+          </li>
+          <li><b>The "proprioception advisor" section specifically</b> — this is the one section worth reading slowly. Find the exact equation or rule for how <code>c_t</code> (or their motion-evaluation signal) updates the terrain/obstacle cost map. Is it an exponential moving average? A learned correction network? A simple additive term?
+            <span class="target">Maps to: Layer 3 below, directly. This is the single most important mechanism to understand precisely, since it's the one your simplified proxy is standing in for.</span>
+          </li>
+          <li><b>Skim the experiments section</b> — you mainly want to know what failure modes they show their feedback loop fixing (e.g. does it help when vision misjudges terrain difficulty?). You don't need their exact numbers.
+            <span class="target">Maps to: justifying, in your write-up, why the feedback loop matters at all — "this is the failure mode it's designed to catch."</span>
+          </li>
+        </ol>
+      </div>
+      <div class="why topnav">
+        <b>What to write down after reading:</b> one sentence on what their terrain
+        estimator's input/output is, one sentence on the exact correction rule in
+        the proprioception advisor, and one sentence on what real-world failure
+        case the closed loop is shown to fix. If you can write those three
+        sentences from memory without looking back at the paper, you've extracted
+        what this document needs from TOP-Nav.
+      </div>
+    </section>
+
+    <section id="abs-guide">
+      <h2>ABS reading guide — what to actually extract</h2>
+      <div class="readguide">
+        <h4>Read in this order</h4>
+        <ol>
+          <li><b>The system diagram showing the agile policy, recovery policy, and the value network together</b> — get the shape of the switch before the math behind it.
+            <span class="target">Maps to: Layer 2 below — this is the literal structure your dual-policy layer is a simplification of.</span>
+          </li>
+          <li><b>How the agile policy's reward is defined</b> — what does "agile" actually optimize for in their reward function? Speed? Tracking error? Something else?
+            <span class="target">Maps to: your progress-policy's reward terms — should mirror this same prioritization.</span>
+          </li>
+          <li><b>How the recovery policy's reward is defined, and what triggers a switch to it</b> — is the switch a hard threshold, a probability, a continuous blend?
+            <span class="target">Maps to: how your risk-prediction head's output should be used to blend or switch between your two policies — read this section closely, since it's the part you're simplifying away from a learned value network to a threshold.</span>
+          </li>
+          <li><b>The reach-avoid value network section</b> — what does it predict, what's its training signal, how is it different from a normal RL critic?
+            <span class="target">Maps to: explicitly understanding what you're <i>not</i> building, so you can describe the simplification precisely rather than vaguely.</span>
+          </li>
+          <li><b>Skim results showing agile-vs-recovery switching in action</b> — look for a plot or trace showing when the switch fires during a real trajectory.
+            <span class="target">Maps to: what a successful switch should look like when you validate your own version later.</span>
+          </li>
+        </ol>
+      </div>
+      <div class="why abs">
+        <b>What to write down after reading:</b> one sentence each on the agile
+        policy's reward, the recovery policy's reward, and how the reach-avoid
+        value network decides to switch. Then one more sentence, explicitly: "my
+        version replaces the reach-avoid value network with [your risk-prediction
+        head's collision probability], which is simpler because [reason]." That
+        last sentence is the one your supervisor will want to hear, almost verbatim.
+      </div>
+    </section>
+
+    <section id="full-arch" class="topgap">
+      <span class="eyebrow">Architecture</span>
+      <h2>Full system, end to end</h2>
+      <div class="legend-row">
+        <span><span class="swatch" style="background:var(--classical)"></span>classical (unchanged)</span>
+        <span><span class="swatch" style="background:var(--topnav)"></span>TOP-Nav derived</span>
+        <span><span class="swatch" style="background:var(--abs)"></span>ABS derived</span>
+        <span><span class="swatch" style="background:var(--ours)"></span>your RL, kept/split</span>
+      </div>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 700 920" width="700" height="920">
+          <defs>
+            <marker id="arrowM" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="var(--ink-dim)" stroke-width="1.5" stroke-linecap="round"/>
+            </marker>
+            <marker id="arrowF" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="var(--topnav)" stroke-width="1.5" stroke-linecap="round"/>
+            </marker>
+            <marker id="arrowS" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="var(--abs)" stroke-width="1.5" stroke-linecap="round"/>
+            </marker>
+          </defs>
+
+          <!-- sensing -->
+          <rect class="node-box" x="170" y="20" width="360" height="50" rx="8" stroke="var(--classical)"/>
+          <text class="node-text" x="350" y="40" text-anchor="middle">depth camera + height-scan</text>
+          <text class="node-sub" x="350" y="56" text-anchor="middle">raw perception, every control step</text>
+          <path class="flow-line" d="M350 70 V 100" marker-end="url(#arrowM)"/>
+
+          <!-- occupancy -->
+          <rect class="node-box" x="170" y="100" width="360" height="50" rx="8" stroke="var(--classical)"/>
+          <text class="node-text" x="350" y="120" text-anchor="middle">egocentric occupancy grid</text>
+          <text class="node-sub" x="350" y="136" text-anchor="middle">frame-stacked, as in phase 02</text>
+          <path class="flow-line" d="M350 150 V 180" marker-end="url(#arrowM)"/>
+
+          <!-- LAYER 1 box -->
+          <rect x="40" y="180" width="620" height="160" rx="12" fill="none" stroke="var(--topnav)" stroke-width="1" stroke-dasharray="2 2"/>
+          <text class="node-text" x="60" y="200" fill="var(--topnav)">layer 1 — global route (terrain-aware A*)</text>
+
+          <rect class="node-box" x="70" y="215" width="270" height="56" rx="8" stroke="var(--topnav)"/>
+          <text class="node-text" x="205" y="237" text-anchor="middle">learned terrain estimator</text>
+          <text class="node-sub" x="205" y="255" text-anchor="middle">small network → traversability cost</text>
+
+          <rect class="node-box" x="360" y="215" width="270" height="56" rx="8" stroke="var(--classical)"/>
+          <text class="node-text" x="495" y="237" text-anchor="middle">obstacle cost (occupancy)</text>
+          <text class="node-sub" x="495" y="255" text-anchor="middle">unchanged from phase 01-02</text>
+
+          <path class="flow-line" d="M205 271 V 290 H 350" marker-end="url(#arrowM)"/>
+          <path class="flow-line" d="M495 271 V 290 H 350" marker-end="url(#arrowM)"/>
+
+          <rect class="node-box" x="220" y="290" width="260" height="40" rx="8" stroke="var(--topnav)"/>
+          <text class="node-text" x="350" y="312" text-anchor="middle">combined cost map</text>
+
+          <path class="flow-line" d="M350 330 V 360" marker-end="url(#arrowM)"/>
+
+          <rect class="node-box" x="220" y="360" width="260" height="40" rx="8" stroke="var(--classical)"/>
+          <text class="node-text" x="350" y="382" text-anchor="middle">A* waypoint planner</text>
+
+          <path class="flow-line" d="M350 400 V 440" marker-end="url(#arrowM)"/>
+
+          <!-- LAYER 2 box -->
+          <rect x="40" y="440" width="620" height="280" rx="12" fill="none" stroke="var(--abs)" stroke-width="1" stroke-dasharray="2 2"/>
+          <text class="node-text" x="60" y="460" fill="var(--abs)">layer 2 — dual navigation policy (progress / caution)</text>
+
+          <rect class="node-box" x="70" y="478" width="270" height="64" rx="8" stroke="var(--ours)"/>
+          <text class="node-text" x="205" y="500" text-anchor="middle">progress policy (PPO)</text>
+          <text class="node-sub" x="205" y="516" text-anchor="middle">reward: progress + heading</text>
+          <text class="node-sub" x="205" y="530" text-anchor="middle">+ smoothness — speed-biased</text>
+
+          <rect class="node-box" x="360" y="478" width="270" height="64" rx="8" stroke="var(--ours)"/>
+          <text class="node-text" x="495" y="500" text-anchor="middle">caution policy (PPO)</text>
+          <text class="node-sub" x="495" y="516" text-anchor="middle">reward: collision-avoidance</text>
+          <text class="node-sub" x="495" y="530" text-anchor="middle">+ stability — safety-biased</text>
+
+          <path class="flow-line" d="M205 542 V 570" marker-end="url(#arrowM)"/>
+          <path class="flow-line" d="M495 542 V 570" marker-end="url(#arrowM)"/>
+
+          <rect class="node-box" x="160" y="570" width="380" height="64" rx="8" stroke="var(--abs)"/>
+          <text class="node-text" x="350" y="592" text-anchor="middle">risk-prediction head (from phase 02)</text>
+          <text class="node-sub" x="350" y="608" text-anchor="middle">P(collision, next N steps) → blend weight</text>
+          <text class="node-sub" x="350" y="622" text-anchor="middle">replaces ABS's full reach-avoid value network</text>
+
+          <path class="flow-line switch" d="M280 600 H 230" marker-end="url(#arrowS)"/>
+          <path class="flow-line switch" d="M420 600 H 470" marker-end="url(#arrowS)"/>
+          <text class="node-sub" x="220" y="595" text-anchor="middle" fill="var(--abs)">low risk</text>
+          <text class="node-sub" x="480" y="595" text-anchor="middle" fill="var(--abs)">high risk</text>
+
+          <path class="flow-line" d="M350 634 V 660" marker-end="url(#arrowM)"/>
+
+          <rect class="node-box" x="220" y="660" width="260" height="40" rx="8" stroke="var(--abs)"/>
+          <text class="node-text" x="350" y="682" text-anchor="middle">blended velocity command (vx, vy, ω)</text>
+
+          <path class="flow-line" d="M350 720 V 760" marker-end="url(#arrowM)"/>
+
+          <!-- frozen locomotion -->
+          <rect class="node-box" x="170" y="760" width="360" height="56" rx="8" stroke="var(--classical)"/>
+          <text class="node-text" x="350" y="782" text-anchor="middle">frozen locomotion policy</text>
+          <text class="node-sub" x="350" y="800" text-anchor="middle">unchanged — tracks cmd → 12 joint torques</text>
+
+          <!-- LAYER 3 feedback, dashed line back up -->
+          <path class="flow-line feedback" d="M170 788 H 60 V 245 H 70" marker-end="url(#arrowF)"/>
+          <text class="node-sub" x="20" y="500" fill="var(--topnav)" transform="rotate(-90 20 500)">layer 3 — feedback correction</text>
+
+          <rect class="node-box" x="170" y="850" width="360" height="56" rx="8" stroke="var(--topnav)"/>
+          <text class="node-text" x="350" y="872" text-anchor="middle">torque + orientation deviation signal</text>
+          <text class="node-sub" x="350" y="890" text-anchor="middle">EMA-corrects terrain cost in layer 1</text>
+          <path class="flow-line" d="M350 816 V 850" marker-end="url(#arrowM)"/>
+          <path class="flow-line feedback" d="M170 878 H 60 V 245 H 70" marker-end="url(#arrowF)"/>
+        </svg>
+      </div>
+      <div class="callout">
+        <p>Read the dashed teal line as the literal feedback loop from TOP-Nav: a
+        signal computed from how the frozen locomotion policy is actually behaving
+        (high effort, body tilting) flows back up and nudges the terrain cost used
+        by layer 1's planner. The dashed orange lines are the ABS-derived switch:
+        the risk head's output decides how much weight the progress policy versus
+        the caution policy gets in the final blended command.</p>
+      </div>
+    </section>
+
+    <section id="layer1">
+      <h3>Layer 1 — terrain-aware global route</h3>
+      <p>
+        This is your existing A* planner, with one addition: instead of a
+        hand-coded terrain cost (e.g. "rubble = high cost, flat ground = low
+        cost"), a small learned network estimates traversability from sensor
+        input, the way TOP-Nav's terrain estimator does. A* still runs once per
+        goal over the static layout — nothing about A* itself changes, only what
+        cost values it's planning over.
+      </p>
+      <div class="why topnav">
+        <b>Why learn the terrain cost instead of keeping it hand-coded?</b> A
+        hand-coded cost only knows what you told it to know — "rubble is
+        expensive" is true until you hit a kind of rough terrain you didn't
+        anticipate. A learned estimator, trained on locomotion's own experience
+        (this is exactly what layer 3 feeds back into it), can pick up terrain
+        difficulty patterns you never explicitly coded, the same generalization
+        argument that motivated implicit terrain adaptation over discrete terrain
+        classification in your locomotion policy in the first place.
+      </div>
+    </section>
+
+    <section id="layer2">
+      <h3>Layer 2 — dual progress / caution navigation policy</h3>
+      <p>
+        Instead of one PPO policy trying to be simultaneously fast and safe, train
+        two smaller policies, each optimized for one objective, and blend their
+        outputs using the risk-prediction head's collision-probability estimate as
+        the blend weight. When predicted risk is low, the progress policy
+        dominates the output; when risk is high, the caution policy takes over.
+      </p>
+      <div class="why abs">
+        <b>Why blend instead of a hard switch?</b> A hard switch (100% progress
+        policy, then suddenly 100% caution policy) can produce a visible jerk in
+        the velocity command right at the switch point — exactly the kind of thing
+        your jerk metric from phase 03 penalizes. A continuous blend, weighted by
+        the risk head's probability output, gives a smoother transition and is
+        simpler to implement than ABS's own value-network-gated switch, while
+        keeping the same underlying idea: let a specialized policy take over when
+        danger is anticipated, rather than asking one policy to handle both regimes
+        adequately.
+      </div>
+      <div class="why abs">
+        <b>Why is this still "simplified ABS," not full ABS?</b> ABS's reach-avoid
+        value network is trained specifically to estimate reachability into
+        unsafe states — a more rigorous, control-theoretic signal than a binary
+        collision classifier. Your risk-prediction head is a simpler auxiliary
+        output, already built in phase 02, repurposed here as the blend weight
+        instead of training a new network. This is a legitimate scoped-down
+        version, but say so explicitly rather than calling it ABS outright.
+      </div>
+    </section>
+
+    <section id="layer3">
+      <h3>Layer 3 — closed-loop proprioception correction</h3>
+      <p>
+        This is unchanged from your existing design: the joint-torque-magnitude
+        and base-orientation-deviation signal, read directly from the frozen
+        locomotion policy's behavior, feeds back as an EMA correction to layer 1's
+        terrain cost estimate. The only difference in this hybrid version is that
+        it now corrects a <i>learned</i> terrain cost (layer 1) instead of a
+        hand-coded one — so the correction has something more meaningful to adjust.
+      </p>
+      <div class="why topnav">
+        <b>Why keep your proxy signal instead of switching to a real asymmetric critic value now?</b>
+        Your locomotion checkpoint is frozen and stable; retraining it with an
+        asymmetric critic just to get a TOP-Nav-faithful <code>c_t</code> is a real
+        cost for a feedback signal that's one piece of a now-larger system. Adding
+        two more moving parts (dual policy, learned terrain cost) at the same time
+        as retraining locomotion is a lot of simultaneous change to debug if
+        something goes wrong. Keep the proxy here; revisit the asymmetric critic
+        only if this whole hybrid system is working and you have time left for
+        further refinement.
+      </div>
+    </section>
+
+    <section id="vs-table" class="topgap">
+      <span class="eyebrow">Comparison</span>
+      <h2>This architecture vs. each source paper</h2>
+      <table>
+        <tr><th>Component</th><th>TOP-Nav</th><th>ABS</th><th>This hybrid design</th></tr>
+        <tr><td>Global route</td><td class="mono">classical, terrain-aware</td><td class="mono">not addressed</td><td class="mono">classical A*, terrain-aware (kept)</td></tr>
+        <tr><td>Navigation decision</td><td class="mono">none — planner only</td><td class="mono">dual RL policy + value-net switch</td><td class="mono">dual RL policy + risk-head blend</td></tr>
+        <tr><td>Feedback loop</td><td class="mono">yes — c_t corrects cost map</td><td class="mono">not addressed</td><td class="mono">yes — proxy signal corrects cost map</td></tr>
+        <tr><td>Safety mechanism</td><td class="mono">implicit via terrain avoidance</td><td class="mono">explicit reach-avoid switching</td><td class="mono">explicit risk-head blending (simplified)</td></tr>
+        <tr><td>Locomotion critic</td><td class="mono">asymmetric, reused as advisor</td><td class="mono">not the focus</td><td class="mono">symmetric/proxy, not reused directly</td></tr>
+      </table>
+    </section>
+
+    <section id="novelty">
+      <h3>What's actually novel here</h3>
+      <p>
+        Be precise about this when you describe it to your supervisor: no single
+        piece of this is new research. What's a genuine combination not present in
+        any one paper is the specific pairing of a closed-loop, learned terrain cost
+        (TOP-Nav's idea) feeding a classical planner, with a dual specialized
+        navigation policy (ABS's idea) sitting downstream of that planner and using
+        an anticipatory risk signal as a continuous blend weight rather than a
+        hard switch. TOP-Nav has no learned navigation policy to combine with;
+        ABS has no terrain-aware planner or feedback loop to combine with. The
+        combination is the contribution, not any individual mechanism.
+      </p>
+    </section>
+
+    <section id="build-order" class="topgap">
+      <span class="eyebrow">Practical</span>
+      <h2>Recommended build order</h2>
+      <p>
+        Don't build all three layers' new pieces at once. A staged path that keeps
+        you able to fall back to a working system at every step:
+      </p>
+      <table>
+        <tr><th>Step</th><th>What changes</th><th>Why this order</th></tr>
+        <tr><td>0</td><td class="mono">Your current single-policy nav (phases 1-3)</td><td>Working baseline — never lose this</td></tr>
+        <tr><td>1</td><td class="mono">Swap hand-coded terrain cost → learned terrain estimator</td><td>Smallest change, isolated to layer 1, easy to validate against the hand-coded baseline</td></tr>
+        <tr><td>2</td><td class="mono">Split single nav policy → progress + caution policies, hard switch first</td><td>Get two policies training and producing sane output before adding blend complexity</td></tr>
+        <tr><td>3</td><td class="mono">Hard switch → continuous blend using risk head</td><td>Refinement once both policies independently work</td></tr>
+        <tr><td>4</td><td class="mono">Re-point feedback loop at the new learned terrain cost</td><td>Last, since it depends on layer 1's new cost already being stable</td></tr>
+      </table>
+      <div class="callout">
+        <p>If time runs out at any step, you still have a working, defensible
+        system from the step before — this is the same "stage it so a partial
+        result is still a result" logic from phase 04's multi-robot plan.</p>
+      </div>
+    </section>
+
+    <section id="pitch">
+      <h3>One-paragraph supervisor pitch</h3>
+      <div class="pitch-box">
+        <span class="eyebrow">Say this, roughly</span>
+        <p>
+          "Our navigation architecture combines ideas from two recent papers: from
+          TOP-Nav, a learned terrain-cost estimator feeding a classical A* planner,
+          closed by a proprioception feedback loop that corrects the cost map using
+          the locomotion policy's own experience; from Agile But Safe, the idea of
+          specializing navigation into a progress-seeking policy and a
+          caution-biased policy rather than asking one policy to balance both, with
+          an anticipatory risk signal blending between them. Neither paper combines
+          these ideas — TOP-Nav has no learned navigation policy, and ABS has no
+          terrain-aware planning or feedback loop — so the combination, scoped down
+          to fit our timeline, is the contribution."
+        </p>
+      </div>
+    </section>
+
+    <footer>NEUROGAIT · HYBRID NAVIGATION ARCHITECTURE · TOP-NAV + ABS + LEARNED NAV POLICY</footer>
+
+  </main>
+</div>
+<script>
+  const links = document.querySelectorAll('#toc a');
+  const sections = [...links].map(l => document.querySelector(l.getAttribute('href'))).filter(Boolean);
+  function onScroll(){
+    let current = sections[0];
+    const y = window.scrollY + 100;
+    sections.forEach(s => { if (s && s.offsetTop <= y) current = s; });
+    links.forEach(l => l.classList.toggle('active', current && l.getAttribute('href') === '#' + current.id));
+  }
+  document.addEventListener('scroll', onScroll);
+  onScroll();
+</script>
+</body>
+</html>
