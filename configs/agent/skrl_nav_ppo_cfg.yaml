@@ -1,0 +1,63 @@
+# d:/CAPSTONE/Navigation/configs/agent/skrl_nav_ppo_cfg.yaml
+# AT1: Navigation PPO Configuration for NeuroGait
+
+agent:
+  class: "PPO"
+  # Training hyperparameters
+  rollouts: 16                # Number of rollout steps per update (horizon length)
+  epochs: 5                   # Number of optimization epochs per rollout batch
+  mini_batches: 4             # Number of mini-batches for surrogate loss optimization
+  discount_factor: 0.99       # Discount factor (gamma)
+  lambda_gae: 0.95            # Generalized Advantage Estimation parameter (lambda)
+  
+  # Clipping parameters
+  clip_range: 0.2             # PPO clip ratio for policy surrogate objective
+  clip_range_vf: 0.2          # Clip ratio for value function surrogate objective (bounds updates)
+  grad_norm_clip: 1.0         # Maximum gradient norm clipping threshold
+  
+  # Loss multipliers
+  value_loss_scale: 1.0       # Coefficient weight for value function loss
+  entropy_coefficient: 0.005  # Entropy coefficient to encourage action space exploration
+  
+  # Learning rate configuration
+  learning_rate: 3.0e-4       # Initial policy & value network learning rate
+  lr_scheduler:
+    class: "KLAdaptiveRL"     # Adaptive learning rate decay based on target KL divergence
+    kl_threshold: 0.008       # Target KL divergence constraint
+
+  # Normalization configuration
+  state_preprocessor: "RunningStandardScaler" # Online observation mean/std standardization
+  state_preprocessor_kwargs:
+    clip_actions: false
+    clip_ob: 5.0              # Clip standard deviations to limit extreme outliers
+    epsilon: 1.0e-5
+
+# Policy and Value Network Structural Layouts
+model:
+  actor:
+    hidden_layers: [256, 128, 64]
+    activation: "elu"         # Exponential Linear Units (ELU) prevent vanishing/dying gradients
+    output_activation: null   # Raw linear mean, bounded via gymnasium action spaces
+    distribution: "Gaussian"  # Gaussian distribution for continuous velocity outputs
+    
+  critic:
+    hidden_layers: [256, 128, 64]
+    activation: "elu"
+    output_activation: null   # Output dimension = 1 (State Value estimation V(s))
+
+# High-Level Navigation Space Interface
+spaces:
+  # Observation Space Dimensions (48 elements total)
+  observation:
+    goal_direction: 2         # [cos(heading_error), sin(heading_error)]
+    goal_distance: 1          # 1D scalar metric (meters)
+    robot_velocity: 3         # Base linear velocities [vx, vy, yaw_rate]
+    waypoint_sequence: 10     # Local 5-waypoint trajectory offsets [x_1, y_1, ..., x_5, y_5]
+    privileged_obstacles: 32  # Local exteroceptive occupancy sector scan distances
+    total_dim: 48
+    
+  # Action Space (3 elements total - continuous control commands)
+  action:
+    vx: [-1.0, 1.0]           # Target forward velocity command (meters/sec)
+    vy: [-0.5, 0.5]           # Target lateral velocity command (meters/sec)
+    yaw_rate: [-1.5, 1.5]     # Target angular yaw velocity command (rad/sec)

@@ -42,6 +42,9 @@ docker/.container.cfg
 **/.neptune/*
 docker/artifacts/
 *.tmp
+tb_logs/
+evaluation_results/
+checkpoints/
 
 # Doc Outputs
 **/docs/_build/*
@@ -65,7 +68,7 @@ _build
 /datasets/
 
 # Tests
-tests/
+# tests/ # Let's not ignore local tests directory if it contains local unit tests!
 
 # Docker history
 .isaac-lab-docker-history

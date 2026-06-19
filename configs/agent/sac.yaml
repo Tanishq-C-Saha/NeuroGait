@@ -1,0 +1,11 @@
+# d:/CAPSTONE/Navigation/configs/agent/sac.yaml
+class_name: "SACAgent"
+total_timesteps: 5000000
+learning_rate: 3e-4
+batch_size: 256
+discount_factor: 0.99
+tau: 0.005
+actor_hidden_layers: [256, 256]
+critic_hidden_layers: [256, 256]
+random_timesteps: 10000
+memory_size: 1000000
