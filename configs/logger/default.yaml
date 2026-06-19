@@ -1,0 +1,9 @@
+# d:/CAPSTONE/Navigation/configs/logger/default.yaml
+type: "tensorboard" # [tensorboard, wandb, csv]
+project_name: "neurogait_navigation"
+entity: "ethz_legged_robotics"
+log_frequency: 100 # episodes or steps
+save_interval: 1000 # steps
+log_videos: true
+video_interval: 50000
+log_dir: "logs"

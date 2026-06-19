@@ -1,0 +1,19 @@
+# d:/CAPSTONE/Navigation/configs/agent/ppo.yaml
+class_name: "PPOAgent"
+total_timesteps: 10000000
+learning_rate: 3e-4
+mini_batches: 4
+discount_factor: 0.99
+lambda_gae: 0.95
+entropy_coefficient: 0.01
+clip_range: 0.2
+epochs: 5
+
+risk_head:
+  loss_weight: 0.5
+  threshold: 0.7
+
+dual_policy:
+  enabled: true
+  agile_weight: "outputs/checkpoints/agile.pt"
+  conservative_weight: "outputs/checkpoints/conservative.pt"

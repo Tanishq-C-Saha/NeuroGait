@@ -1,0 +1,17 @@
+# d:/CAPSTONE/Navigation/configs/robot/go2.yaml
+name: "go2"
+mass: 15.0 # kg
+dof: 12
+joint_names: [
+  "FL_hip", "FL_thigh", "FL_calf",
+  "FR_hip", "FR_thigh", "FR_calf",
+  "RL_hip", "RL_thigh", "RL_calf",
+  "RR_hip", "RR_thigh", "RR_calf"
+]
+base_link: "base"
+foot_links: ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+collision_shapes: ["box", "cylinder"]
+control:
+  kp: 20.0
+  kd: 0.5
+  torque_limit: 23.7

@@ -1,0 +1,45 @@
+# d:/CAPSTONE/Navigation/.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Logs and databases
+tb_logs/
+logs/
+evaluation_results/
+outputs/
+multirun/
+checkpoints/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo

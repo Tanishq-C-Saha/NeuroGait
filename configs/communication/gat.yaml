@@ -1,0 +1,11 @@
+# d:/CAPSTONE/Navigation/configs/communication/gat.yaml
+enabled: false
+num_agents: 2
+communication_range: 10.0 # meters
+hidden_dim: 64
+num_heads: 4
+dropout: 0.1
+message_dim: 16
+shared_memory:
+  enabled: true
+  sync_rate_hz: 5
