@@ -76,16 +76,15 @@ def occupancy_grid_obs(env: ManagerBasedEnv) -> torch.Tensor:
                            device=env.device, dtype=torch.float32)
 
     # ── 3. unproject depth → camera-frame 3D points ──────────────────────────
-    # unproject_depth returns (E, H, W, 3) using the pinhole formula:
+    # unproject_depth returns (E, N, 3) already flattened, where N = H*W.
     #   pt_cam = K⁻¹ · [u, v, 1]ᵀ · depth[u,v]
-    points_cam = unproject_depth(depth, K_mats)   # (E, H, W, 3)
+    points_cam = unproject_depth(depth, K_mats)   # (E, N, 3)
 
     # ── 4. camera frame → world frame ────────────────────────────────────────
     # transform_points applies the rigid transform T = (pos_w, quat_w):
     #   pt_world = quat_apply(quat_w, pt_cam) + pos_w
-    E, H, W, _ = points_cam.shape
-    pts_cam_flat = points_cam.reshape(E, H * W, 3)              # (E, N, 3)
-    points_world = transform_points(pts_cam_flat, pos_w, quat_w)  # (E, N, 3)
+    E, N, _ = points_cam.shape   # N = H*W, points already flattened
+    points_world = transform_points(points_cam, pos_w, quat_w)  # (E, N, 3)
 
     # ── 5. world frame → robot frame ─────────────────────────────────────────
     # Robot frame is defined by the base link pose: subtract its position,
@@ -97,9 +96,9 @@ def occupancy_grid_obs(env: ManagerBasedEnv) -> torch.Tensor:
     points_rel = points_world - robot_pos.unsqueeze(1)          # (E, N, 3)
 
     # rotate by quat⁻¹ to go from world axes to robot-body axes
-    quat_inv_r = quat_inv(robot_quat)                            # (E, 4)
-    quat_inv_r = quat_inv_r.unsqueeze(1).expand(-1, H * W, -1)  # (E, N, 4)
-    points_robot = quat_apply(quat_inv_r, points_rel)            # (E, N, 3)
+    quat_inv_r = quat_inv(robot_quat)                           # (E, 4)
+    quat_inv_r = quat_inv_r.unsqueeze(1).expand(-1, N, -1)     # (E, N, 4)
+    points_robot = quat_apply(quat_inv_r, points_rel)           # (E, N, 3)
 
     # ── 6. build occupancy grid per environment ───────────────────────────────
     # points_to_occupancy_grid works on CPU numpy arrays; we loop over envs.
@@ -139,17 +138,15 @@ def occupancy_grid_obs_gpu(env: ManagerBasedEnv) -> torch.Tensor:
     if torch.isnan(pos_w).any() or torch.isnan(quat_w).any():
         return torch.zeros(env.num_envs, 1600, device=env.device, dtype=torch.float32)
 
-    E, H, W = depth.shape
-
-    points_cam   = unproject_depth(depth, K_mats)                       # (E, H, W, 3)
-    pts_flat     = points_cam.reshape(E, H * W, 3)                      # (E, N, 3)
-    points_world = transform_points(pts_flat, pos_w, quat_w)            # (E, N, 3)
+    points_cam   = unproject_depth(depth, K_mats)                       # (E, N, 3)
+    E, N, _      = points_cam.shape                                     # N = H*W, already flat
+    points_world = transform_points(points_cam, pos_w, quat_w)         # (E, N, 3)
 
     robot_pos  = robot.data.root_pos_w
     robot_quat = robot.data.root_quat_w
     points_rel = points_world - robot_pos.unsqueeze(1)
-    q_inv      = quat_inv(robot_quat).unsqueeze(1).expand(-1, H * W, -1)
-    pts_robot  = quat_apply(q_inv, points_rel)                          # (E, N, 3)
+    q_inv      = quat_inv(robot_quat).unsqueeze(1).expand(-1, N, -1)
+    pts_robot  = quat_apply(q_inv, points_rel)                         # (E, N, 3)
 
     # ── torch binning ─────────────────────────────────────────────────────────
     n_cells     = int(_GRID_SIZE_M / _RESOLUTION_M)   # 40
