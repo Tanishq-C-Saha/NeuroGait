@@ -13,9 +13,12 @@ Run:
 """
 
 import argparse
+import csv
 import math
 import sys
 import os
+
+import numpy as np
 
 from isaaclab.app import AppLauncher
 
@@ -28,7 +31,6 @@ import cli_args  # noqa: E402  isort: skip
 parser = argparse.ArgumentParser(description="CP4: A→B navigation demo")
 parser.add_argument("--task",       type=str, required=True,  help="Gym task id")
 parser.add_argument("--num_envs",   type=int, default=1,      help="Number of envs")
-parser.add_argument("--checkpoint", type=str, required=True,  help="Path to .pt checkpoint")
 parser.add_argument("--goal_x",     type=float, default=8.0,  help="Goal X (world m)")
 parser.add_argument("--goal_y",     type=float, default=0.0,  help="Goal Y (world m)")
 parser.add_argument("--agent",      type=str,
@@ -51,10 +53,12 @@ import torch
 import gymnasium as gym
 from rsl_rl.runners import OnPolicyRunner, DistillationRunner
 
+import isaaclab.sim as sim_utils
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.utils.assets import retrieve_file_path
 
-from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper
+import importlib.metadata as metadata
+from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import isaaclab_tasks  # noqa: F401
@@ -63,6 +67,9 @@ import neurogait.tasks  # noqa: F401
 from neurogait.tasks.manager_based.navigation.planning.global_grid import build_global_grid
 from neurogait.tasks.manager_based.navigation.planning.planner import AStarPlanner
 from neurogait.tasks.manager_based.navigation.control.waypoint_controller import WaypointController
+
+# maps/ directory at project root (one level above scripts/)
+_MAPS_DIR = os.path.join(os.path.dirname(__file__), "..", "maps")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -73,6 +80,78 @@ def quat_to_yaw(quat_wxyz):
     return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
+def save_map(grid, origin, resolution, path_world, start_xy, goal_xy):
+    """Save occupancy grid + path as PNG and CSV to maps/."""
+    os.makedirs(_MAPS_DIR, exist_ok=True)
+
+    # ── PNG via matplotlib ────────────────────────────────────────────────────
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        rows, cols = grid.shape
+        extent = [
+            origin[0], origin[0] + cols * resolution,
+            origin[1], origin[1] + rows * resolution,
+        ]
+        ax.imshow(grid, origin="lower", cmap="gray_r", extent=extent, vmin=0, vmax=1)
+
+        if path_world:
+            xs = [p[0] for p in path_world]
+            ys = [p[1] for p in path_world]
+            ax.plot(xs, ys, "b-o", markersize=5, linewidth=2, label="A* path", zorder=3)
+
+        ax.plot(*start_xy, marker="*", color="lime",   markersize=18,
+                label="Start", zorder=4, markeredgecolor="black", markeredgewidth=0.5)
+        ax.plot(*goal_xy,  marker="*", color="red",    markersize=18,
+                label="Goal",  zorder=4, markeredgecolor="black", markeredgewidth=0.5)
+
+        ax.set_xlabel("X (m)")
+        ax.set_ylabel("Y (m)")
+        ax.set_title("CP4 — Global Occupancy Grid + A* Path")
+        ax.legend(loc="upper left")
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect("equal")
+
+        png_path = os.path.join(_MAPS_DIR, "global_grid.png")
+        plt.savefig(png_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"[CP4] Map image saved → {png_path}")
+
+    except ImportError:
+        print("[CP4] matplotlib not available — skipping PNG, saving .npy only")
+
+    # ── raw grid as numpy ─────────────────────────────────────────────────────
+    npy_path = os.path.join(_MAPS_DIR, "global_grid.npy")
+    np.save(npy_path, grid)
+    print(f"[CP4] Grid array saved  → {npy_path}")
+
+    # ── path as CSV ───────────────────────────────────────────────────────────
+    if path_world:
+        csv_path = os.path.join(_MAPS_DIR, "path_waypoints.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["x", "y"])
+            writer.writerows(path_world)
+        print(f"[CP4] Path CSV saved    → {csv_path}")
+
+
+def spawn_marker(prim_path, xyz, color_rgb, size=(0.25, 0.25, 0.6)):
+    """Spawn a coloured visual-only cuboid at world xyz.  No physics."""
+    cfg = sim_utils.CuboidCfg(
+        size=size,
+        visual_material=sim_utils.PreviewSurfaceCfg(
+            diffuse_color=color_rgb,
+            opacity=0.85,
+        ),
+        # no rigid_props / collision_props → purely visual
+    )
+    cfg.func(prim_path, cfg, translation=xyz)
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -80,7 +159,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """CP4 end-to-end play loop."""
 
     # ── 1. configure env ─────────────────────────────────────────────────────
+    installed_version = metadata.version("rsl-rl-lib")
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
     env_cfg.scene.num_envs = args_cli.num_envs
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
 
@@ -120,13 +201,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         env.close()
         return
 
-    # ── 7. create controller ─────────────────────────────────────────────────
+    # ── 7. save map + path to maps/ ──────────────────────────────────────────
+    save_map(grid, origin, 0.2, waypoints, start_xy, goal_xy)
+
+    # ── 8. spawn visual markers in the sim viewport ───────────────────────────
+    # green pillar = start,  red pillar = goal
+    spawn_marker(
+        "/World/Markers/start",
+        xyz=(start_xy[0], start_xy[1], 0.3),
+        color_rgb=(0.05, 0.9, 0.05),   # green
+    )
+    spawn_marker(
+        "/World/Markers/goal",
+        xyz=(goal_xy[0], goal_xy[1], 0.3),
+        color_rgb=(0.9, 0.05, 0.05),   # red
+    )
+    print(f"[CP4] Markers spawned — green={start_xy}, red={goal_xy}")
+
+    # ── 9. create controller ─────────────────────────────────────────────────
     controller = WaypointController(planner)
 
-    # ── 8. get reference to velocity command term for injection ───────────────
+    # ── 10. get reference to velocity command term for injection ──────────────
     vel_term = env.unwrapped.command_manager.get_term("base_velocity")
 
-    # ── 9. main loop ─────────────────────────────────────────────────────────
+    # ── 11. main loop ─────────────────────────────────────────────────────────
     MAX_STEPS = args_cli.max_steps
     goal_reached_count = 0
 
@@ -152,7 +250,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         else:
             goal_reached_count = 0
 
-        # inject velocity command into the command term before obs compute
+        # inject velocity command before obs compute
         vel_term.vel_command_b[0, 0] = vx
         vel_term.vel_command_b[0, 1] = vy
         vel_term.vel_command_b[0, 2] = yaw_rate
@@ -162,10 +260,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             obs = env.get_observations()
             actions = policy(obs)
 
-        # step env (will randomise command internally, but we override each iter)
+        # step env (randomises command internally; we override each iteration)
         obs, _, dones, _ = env.step(actions)
 
-        # status print
+        # status print every 50 steps
         if step % 50 == 0:
             wp_idx = controller.current_waypoint_idx
             total = len(planner.path_world)
