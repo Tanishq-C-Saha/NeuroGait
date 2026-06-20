@@ -1,13 +1,15 @@
-"""MDP components for the NeuroGait navigation task family.
+"""Navigation MDP functions.
 
-Exports the full set of functions needed by navigation_base_env_cfg.py:
-  - everything from isaaclab.envs.mdp (observations, events, base rewards …)
-  - locomotion-style rewards, curriculums, terminations (owned by navigation)
-  - CP3: occupancy grid observation terms
-  - CP3: NullCommandCfg stub
+This package contains ONLY Python functions (the actual computation logic).
+Config dataclasses (@configclass) live in navigation/managers/ instead.
+
+Exports:
+  - everything from isaaclab.envs.mdp (base obs, events, action funcs …)
+  - navigation-owned locomotion functions: feet_air_time, terrain_levels_vel …
+  - CP3 depth-camera functions: occupancy_grid_obs, occupancy_grid_obs_gpu
 """
 
-# base isaaclab mdp (observations, actions, events, commands …)
+# base isaaclab mdp functions (observations, events, actions, commands …)
 from isaaclab.envs.mdp import *  # noqa: F401, F403
 
 # navigation-owned locomotion-style functions
@@ -15,8 +17,5 @@ from .curriculums import *   # noqa: F401, F403
 from .rewards import *       # noqa: F401, F403
 from .terminations import *  # noqa: F401, F403
 
-# CP3: depth-camera → occupancy grid observation terms
+# CP3: depth-camera → occupancy grid
 from .observations import occupancy_grid_obs, occupancy_grid_obs_gpu
-
-# CP3: command config stub (future CPs will replace with planner-backed term)
-from .commands import NullCommandCfg
