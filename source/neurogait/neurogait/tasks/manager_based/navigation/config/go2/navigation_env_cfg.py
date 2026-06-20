@@ -143,6 +143,11 @@ class NeuroGaitNavigationCP1EnvCfg_PLAY(NeuroGaitNavigationCP1EnvCfg):
         self.scene.env_spacing = 2.5
         self.scene.terrain.max_init_terrain_level = None
 
+        # CP4 navigation can take 30–60 sim-seconds to reach an 8 m goal.
+        # The base config sets 20 s which causes mid-run respawns; 120 s
+        # is generous enough for any planned path we generate.
+        self.episode_length_s = 120.0
+
         if getattr(self.scene.terrain, "terrain_generator", None) is not None:
             self.scene.terrain.terrain_generator.num_rows   = 5
             self.scene.terrain.terrain_generator.num_cols   = 5
