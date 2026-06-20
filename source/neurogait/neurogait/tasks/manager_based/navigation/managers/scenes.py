@@ -69,17 +69,19 @@ class MySceneCfg(InteractiveSceneCfg):
     #  Y
     #  ↑
     #  3 |                         [cyl_03]
-    #  2 |    [cube_01]   [cube_09]     [cube_05]
-    #  1 |         [cube_07] [cyl_01]       [cube_04]
-    #  0 | start──[cyl_04]──[cyl_05]──[cube_08]──goal(8,0)
-    # -1 |        [cube_02]       [cyl_02]   [cyl_06]
-    # -2 |              [cube_03] [cube_10]      [cube_06]
+    #  2 |    [cube_01]                        [cube_05]
+    #  1 |             [cyl_01]          [cube_04]
+    #  0 | start ─────────────────────────────────── goal(8,0)
+    # -1 |        [cube_02]       [cyl_02]
+    # -2 |              [cube_03]            [cube_06]
     # -3 |
     #    └──────────────────────────────────────────────────→ X
     #    0     1     2     3     4     5     6     7     8
     #
-    # NEW vs CP3.5: cube_07, cube_08, cube_09, cube_10, cyl_04, cyl_05, cyl_06
-    # These place obstacles directly on the y=0 straight line to force A* to deviate.
+    # With 0.30 m C-space inflation, cyl_01 blocks y=0 from x≈2.88–4.12
+    # and cube_04 blocks y=0 from x≈6.18–6.82, forcing two clear detours.
+    # cube_02+cube_03+cyl_02 form a merged southern wall; cube_04+cube_05
+    # form a merged upper-right wall — leaving a clear navigable corridor.
 
     obstacle_cube_01: RigidObjectCfg = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/obstacle_cube_01",
@@ -192,93 +194,3 @@ class MySceneCfg(InteractiveSceneCfg):
         init_state=RigidObjectCfg.InitialStateCfg(pos=(5.0, 2.8, 0.3)),
     )
 
-    # ── additional obstacles (CP4): force non-trivial A* path ────────────────
-    # cyl_04 and cyl_05 sit DIRECTLY on the y=0 straight line — any direct
-    # path from start to goal must detour around them.
-
-    obstacle_cube_07: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/obstacle_cube_07",
-        spawn=sim_utils.CuboidCfg(
-            size=(0.7, 1.4, 0.5),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
-            mass_props=sim_utils.MassPropertiesCfg(mass=48.0),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.55, 0.28, 0.1)),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(1.8, 0.8, 0.25)),
-    )
-
-    obstacle_cube_08: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/obstacle_cube_08",
-        spawn=sim_utils.CuboidCfg(
-            size=(0.8, 1.6, 0.5),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
-            mass_props=sim_utils.MassPropertiesCfg(mass=52.0),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.27, 0.08)),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(6.3, 0.0, 0.25)),
-    )
-
-    obstacle_cube_09: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/obstacle_cube_09",
-        spawn=sim_utils.CuboidCfg(
-            size=(1.2, 0.8, 0.5),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
-            mass_props=sim_utils.MassPropertiesCfg(mass=50.0),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.52, 0.3, 0.1)),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(4.2, 2.0, 0.25)),
-    )
-
-    obstacle_cube_10: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/obstacle_cube_10",
-        spawn=sim_utils.CuboidCfg(
-            size=(1.4, 0.7, 0.5),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
-            mass_props=sim_utils.MassPropertiesCfg(mass=50.0),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.48, 0.26, 0.09)),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(5.2, -2.0, 0.25)),
-    )
-
-    obstacle_cyl_04: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/obstacle_cyl_04",
-        spawn=sim_utils.CylinderCfg(
-            radius=0.5,
-            height=0.6,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
-            mass_props=sim_utils.MassPropertiesCfg(mass=45.0),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.35, 0.38, 0.42)),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(3.0, 0.0, 0.3)),
-    )
-
-    obstacle_cyl_05: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/obstacle_cyl_05",
-        spawn=sim_utils.CylinderCfg(
-            radius=0.5,
-            height=0.6,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
-            mass_props=sim_utils.MassPropertiesCfg(mass=45.0),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.35, 0.38, 0.42)),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(4.8, 0.0, 0.3)),
-    )
-
-    obstacle_cyl_06: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/obstacle_cyl_06",
-        spawn=sim_utils.CylinderCfg(
-            radius=0.4,
-            height=0.5,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
-            mass_props=sim_utils.MassPropertiesCfg(mass=40.0),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.38, 0.4, 0.44)),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(6.8, -1.2, 0.25)),
-    )
