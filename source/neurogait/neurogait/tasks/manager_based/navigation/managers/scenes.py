@@ -70,8 +70,10 @@ class MySceneCfg(InteractiveSceneCfg):
     camera: None = None
 
     # ── obstacles (CP3.5) ─────────────────────────────────────────────────────
-    # All prims under {ENV_REGEX_NS}/Obstacles/ so CP4's build_global_grid can
-    # filter them by path prefix without touching robot or terrain prims.
+    # All fields named obstacle_* — flat under {ENV_REGEX_NS}, one level deep
+    # (nested paths like {ENV_REGEX_NS}/Obstacles/x require a pre-existing
+    # parent prim that Isaac Lab doesn't auto-create).
+    # CP4's build_global_grid identifies these via env.scene.rigid_objects.
     # Active physics (kinematic_enabled=False), mass 40-65 kg so they react
     # visibly on contact but don't fly away.
     #
@@ -90,7 +92,7 @@ class MySceneCfg(InteractiveSceneCfg):
     #    0     1     2     3     4     5     6     7     8
 
     obstacle_cube_01: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Obstacles/cube_01",
+        prim_path="{ENV_REGEX_NS}/obstacle_cube_01",
         spawn=sim_utils.CuboidCfg(
             size=(1.5, 0.8, 0.5),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
@@ -102,7 +104,7 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     obstacle_cube_02: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Obstacles/cube_02",
+        prim_path="{ENV_REGEX_NS}/obstacle_cube_02",
         spawn=sim_utils.CuboidCfg(
             size=(1.2, 1.0, 0.6),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
@@ -114,7 +116,7 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     obstacle_cube_03: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Obstacles/cube_03",
+        prim_path="{ENV_REGEX_NS}/obstacle_cube_03",
         spawn=sim_utils.CuboidCfg(
             size=(1.8, 0.7, 0.5),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
@@ -126,7 +128,7 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     obstacle_cube_04: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Obstacles/cube_04",
+        prim_path="{ENV_REGEX_NS}/obstacle_cube_04",
         spawn=sim_utils.CuboidCfg(
             size=(1.0, 1.5, 0.6),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
@@ -138,7 +140,7 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     obstacle_cube_05: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Obstacles/cube_05",
+        prim_path="{ENV_REGEX_NS}/obstacle_cube_05",
         spawn=sim_utils.CuboidCfg(
             size=(1.5, 0.8, 0.5),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
@@ -150,7 +152,7 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     obstacle_cube_06: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Obstacles/cube_06",
+        prim_path="{ENV_REGEX_NS}/obstacle_cube_06",
         spawn=sim_utils.CuboidCfg(
             size=(1.2, 0.8, 0.6),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=False, disable_gravity=False),
@@ -162,7 +164,7 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     obstacle_cyl_01: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Obstacles/cyl_01",
+        prim_path="{ENV_REGEX_NS}/obstacle_cyl_01",
         spawn=sim_utils.CylinderCfg(
             radius=0.5,
             height=0.6,
@@ -175,7 +177,7 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     obstacle_cyl_02: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Obstacles/cyl_02",
+        prim_path="{ENV_REGEX_NS}/obstacle_cyl_02",
         spawn=sim_utils.CylinderCfg(
             radius=0.4,
             height=0.5,
@@ -188,7 +190,7 @@ class MySceneCfg(InteractiveSceneCfg):
     )
 
     obstacle_cyl_03: RigidObjectCfg = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Obstacles/cyl_03",
+        prim_path="{ENV_REGEX_NS}/obstacle_cyl_03",
         spawn=sim_utils.CylinderCfg(
             radius=0.45,
             height=0.6,
