@@ -16,6 +16,7 @@ Inheritance chain:
 
 import isaaclab.sim as sim_utils
 from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.sensors import CameraCfg
 from isaaclab.utils import configclass
 
@@ -121,7 +122,13 @@ class NeuroGaitNavigationCP1EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
         )
 
         # ── occupancy grid observation term (CP3) ────────────────────────────
-        self.observations.policy.occupancy_grid = ObsTerm(func=occupancy_grid_obs)
+        # navigation policy observations — separate group, locomotion actor never reads this
+        @configclass
+        class NavigationPolicyCfg(ObsGroup):
+            occupancy_grid = ObsTerm(func=occupancy_grid_obs)
+
+        self.observations.navigation_policy = NavigationPolicyCfg()
+
 
         # ── pin velocity command for deterministic CP3 testing ───────────────
         self.commands.base_velocity.heading_command      = False
