@@ -95,3 +95,97 @@ def stand_still_joint_deviation_l1(
     """Penalize offsets from default joint positions when command is near zero."""
     command = env.command_manager.get_command(command_name)
     return mdp.joint_deviation_l1(env, asset_cfg) * (torch.norm(command[:, :2], dim=1) < command_threshold)
+
+
+# ── CP5: navigation reward / penalty functions ────────────────────────────────
+
+
+def reward_progress(env) -> torch.Tensor:
+    """Distance reduction to current A* waypoint. Also advances waypoints.
+
+    Returns (num_envs,) float — positive when robot moves toward waypoint.
+    Waypoints are advanced when the robot comes within 0.3 m.
+    """
+    if not hasattr(env, "_curr_waypoint_pos") or env._curr_waypoint_pos is None:
+        return torch.zeros(env.num_envs, device=env.device)
+
+    robot_xy = env.scene["robot"].data.root_pos_w[:, :2]
+    curr_dist = torch.norm(robot_xy - env._curr_waypoint_pos, dim=-1)
+
+    progress = env._prev_waypoint_dist - curr_dist
+    env._prev_waypoint_dist = curr_dist.clone()
+
+    # vectorised waypoint advancement
+    n_wps = len(env._waypoints_tensor)
+    can_advance = env._curr_waypoint_idx < (n_wps - 1)
+    should_advance = (curr_dist < 0.3) & can_advance
+
+    env._curr_waypoint_idx = torch.clamp(
+        env._curr_waypoint_idx + should_advance.long(), max=n_wps - 1
+    )
+    env._curr_waypoint_pos = env._waypoints_tensor[env._curr_waypoint_idx]
+
+    return progress
+
+
+def reward_heading(env) -> torch.Tensor:
+    """cos(heading error) toward current waypoint. Range [-1, 1].
+
+    Returns (num_envs,) float — 1.0 when perfectly facing waypoint.
+    """
+    if not hasattr(env, "_curr_waypoint_pos"):
+        return torch.zeros(env.num_envs, device=env.device)
+
+    robot_xy = env.scene["robot"].data.root_pos_w[:, :2]
+    robot_quat = env.scene["robot"].data.root_quat_w
+
+    w, x, y, z = robot_quat[:, 0], robot_quat[:, 1], robot_quat[:, 2], robot_quat[:, 3]
+    robot_yaw = torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+    dx = env._curr_waypoint_pos[:, 0] - robot_xy[:, 0]
+    dy = env._curr_waypoint_pos[:, 1] - robot_xy[:, 1]
+    target_yaw = torch.atan2(dy, dx)
+
+    heading_error = torch.atan2(
+        torch.sin(target_yaw - robot_yaw),
+        torch.cos(target_yaw - robot_yaw),
+    )
+    return torch.cos(heading_error)
+
+
+def penalty_collision(
+    env,
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 1.0,
+) -> torch.Tensor:
+    """-1 when base contact force exceeds threshold, 0 otherwise.
+
+    Uses net_forces_w_history (shape E, H, B, 3); sensor_cfg selects body_ids.
+    Returns (num_envs,) float — negative or zero.
+    """
+    from isaaclab.sensors import ContactSensor
+
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    net_forces = contact_sensor.data.net_forces_w_history  # (E, H, B, 3)
+    # max over history → (E, num_selected_bodies)
+    force_mag = torch.max(
+        torch.norm(net_forces[:, :, sensor_cfg.body_ids], dim=-1), dim=1
+    )[0]
+    # collision if ANY selected body exceeds threshold
+    is_collision = (force_mag > threshold).any(dim=-1)  # (E,)
+    return -is_collision.float()
+
+
+def penalty_smoothness(env) -> torch.Tensor:
+    """-||action_t - action_{t-1}||_2 per environment.
+
+    Penalises jerky velocity commands; encourages smooth trajectories.
+    Returns (num_envs,) float — negative or zero.
+    """
+    if not hasattr(env, "_prev_nav_action"):
+        return torch.zeros(env.num_envs, device=env.device)
+
+    curr_action = env.action_manager.action  # (E, 3)
+    diff = curr_action - env._prev_nav_action
+    env._prev_nav_action = curr_action.clone()
+    return -torch.norm(diff, dim=-1)

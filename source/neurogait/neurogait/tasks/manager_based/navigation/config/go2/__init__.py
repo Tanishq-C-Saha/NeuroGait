@@ -22,3 +22,25 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_locomotion_ppo_cfg:NeuroGaitNavigationCP1PPORunnerCfg",
     },
 )
+
+# ── CP5: trained navigation policy (skrl PPO) ─────────────────────────────────
+
+gym.register(
+    id="NeuroGait-Navigation-CP5-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.navigation_env_cfg:NeuroGaitNavigationCP5EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_navigation_ppo_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="NeuroGait-Navigation-CP5-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.navigation_env_cfg:NeuroGaitNavigationCP5EnvCfg_PLAY",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_navigation_ppo_cfg.yaml",
+    },
+)

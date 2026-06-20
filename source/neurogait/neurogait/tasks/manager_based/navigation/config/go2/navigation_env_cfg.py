@@ -11,21 +11,41 @@ Inheritance chain:
         └── NavigationBaseEnvCfg                 (navigation_base_env_cfg.py)
                 └── NeuroGaitNavigationGo2BaseEnvCfg   (this file)
                         └── NeuroGaitNavigationCP1EnvCfg   (this file, adds camera)
-                                └── NeuroGaitNavigationCP1EnvCfg_PLAY
+                        │       └── NeuroGaitNavigationCP1EnvCfg_PLAY
+                        └── NeuroGaitNavigationCP5EnvCfg   (CP5: trained RL nav policy)
+                                └── NeuroGaitNavigationCP5EnvCfg_PLAY
 """
 
 import isaaclab.sim as sim_utils
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import CameraCfg
 from isaaclab.utils import configclass
 
 from neurogait.tasks.manager_based.navigation.navigation_base_env_cfg import (
     NavigationBaseEnvCfg,
 )
-from neurogait.tasks.manager_based.navigation.mdp import occupancy_grid_obs
+from isaaclab.envs import mdp as env_mdp
+
+from neurogait.tasks.manager_based.navigation import mdp as nav_mdp
+from neurogait.tasks.manager_based.navigation.mdp import (
+    occupancy_grid_obs,
+    occupancy_grid_obs_gpu,
+)
 
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG  # isort: skip
+
+# ── frozen locomotion env config (needed for PreTrainedPolicyActionCfg) ───────
+# We import our own Go2 rough env cfg (same config the checkpoint was trained with).
+# Only .actions.joint_pos and .observations.policy are used by the action term.
+from neurogait.tasks.manager_based.locomotion.velocity.config.go2.rough_env_cfg import (
+    UnitreeGo2RoughEnvCfg,
+)
+
+_LOW_LEVEL_ENV_CFG = UnitreeGo2RoughEnvCfg()
 
 
 # ── Go2 rough-terrain base ────────────────────────────────────────────────────
@@ -147,6 +167,188 @@ class NeuroGaitNavigationCP1EnvCfg_PLAY(NeuroGaitNavigationCP1EnvCfg):
         # The base config sets 20 s which causes mid-run respawns; 120 s
         # is generous enough for any planned path we generate.
         self.episode_length_s = 120.0
+
+        if getattr(self.scene.terrain, "terrain_generator", None) is not None:
+            self.scene.terrain.terrain_generator.num_rows   = 5
+            self.scene.terrain.terrain_generator.num_cols   = 5
+            self.scene.terrain.terrain_generator.curriculum = False
+
+        self.observations.policy.enable_corruption = False
+        self.events.base_external_force_torque     = None
+        self.events.push_robot                     = None
+
+
+# ── CP5: First Trained Navigation Policy ──────────────────────────────────────
+# Architecture:
+#   Navigation policy (skrl PPO, 3-dim action) → PreTrainedPolicyAction
+#   → frozen locomotion policy (TorchScript) → 12 joint targets → physics
+#
+# The navigation policy only sees navigation observations (1612-dim).
+# The locomotion policy's 235-dim obs are handled internally by PreTrainedPolicyAction.
+
+
+@configclass
+class _CP5ActionsCfg:
+    """Actions: velocity command → frozen locomotion policy via PreTrainedPolicyAction."""
+
+    pre_trained_policy_action: nav_mdp.PreTrainedPolicyActionCfg = (
+        nav_mdp.PreTrainedPolicyActionCfg(
+            asset_name="robot",
+            # TorchScript export of the frozen Go2 rough locomotion policy
+            policy_path=(
+                "logs/rsl_rl/unitree_go2_rough/"
+                "2026-06-13_19-33-23/exported/policy.pt"
+            ),
+            low_level_decimation=4,   # loco runs at 50 Hz; nav at 5 Hz
+            low_level_actions=_LOW_LEVEL_ENV_CFG.actions.joint_pos,
+            low_level_observations=_LOW_LEVEL_ENV_CFG.observations.policy,
+        )
+    )
+
+
+@configclass
+class _CP5ObservationsCfg:
+    """Observations for the navigation RL policy (NOT the locomotion policy)."""
+
+    @configclass
+    class PolicyCfg(ObsGroup):
+        """What the navigation policy sees — ~1612-dim."""
+
+        # robot kinematics (6 dims)
+        base_lin_vel      = ObsTerm(func=env_mdp.base_lin_vel)
+        projected_gravity = ObsTerm(func=env_mdp.projected_gravity)
+
+        # goal (3 dims): direction + normalised distance to current A* waypoint
+        goal_vector = ObsTerm(func=nav_mdp.goal_vector_obs)
+
+        # velocity (3 dims): vx, vy, yaw_rate in base frame
+        robot_velocity = ObsTerm(func=nav_mdp.robot_velocity_obs)
+
+        # local occupancy grid from depth camera (1600 dims: 40×40)
+        occupancy_grid = ObsTerm(func=occupancy_grid_obs_gpu)
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    policy: PolicyCfg = PolicyCfg()
+    # Total: 3 + 3 + 3 + 3 + 1600 = 1612 dims
+
+
+@configclass
+class _CP5RewardsCfg:
+    """Navigation reward terms — all 4 logged separately in TensorBoard."""
+
+    termination_penalty = RewTerm(func=env_mdp.is_terminated, weight=-200.0)
+
+    progress = RewTerm(
+        func=nav_mdp.reward_progress,
+        weight=1.0,
+    )
+
+    heading = RewTerm(
+        func=nav_mdp.reward_heading,
+        weight=0.3,
+    )
+
+    collision = RewTerm(
+        func=nav_mdp.penalty_collision,
+        weight=2.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names="base"),
+            "threshold":  1.0,
+        },
+    )
+
+    smoothness = RewTerm(
+        func=nav_mdp.penalty_smoothness,
+        weight=0.1,
+    )
+
+
+@configclass
+class NeuroGaitNavigationCP5EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
+    """CP5: Navigation env with frozen locomotion backbone + RL navigation policy.
+
+    Inherits scene (obstacles, height scanner, contact forces) and robot config
+    from NeuroGaitNavigationGo2BaseEnvCfg. Adds depth camera, then replaces:
+      - actions   → PreTrainedPolicyActionCfg (frozen loco policy)
+      - observations.policy → navigation-only obs (1612-dim)
+      - rewards   → navigation rewards (progress, heading, collision, smoothness)
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # ── depth camera (same as CP1/CP3) ────────────────────────────────────
+        self.scene.camera = CameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base/front_cam",
+            update_period=0.1,
+            height=480,
+            width=640,
+            data_types=["rgb", "distance_to_image_plane"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=24.0,
+                focus_distance=400.0,
+                horizontal_aperture=20.955,
+                clipping_range=(0.1, 1.0e5),
+            ),
+            offset=CameraCfg.OffsetCfg(
+                pos=(0.3, 0.0, 0.1),
+                rot=(0.5, -0.5, 0.5, -0.5),
+                convention="ros",
+            ),
+        )
+
+        # ── replace actions with hierarchical action term ─────────────────────
+        self.actions = _CP5ActionsCfg()
+
+        # ── replace observations with navigation-only obs ─────────────────────
+        self.observations = _CP5ObservationsCfg()
+
+        # ── replace rewards with navigation rewards ───────────────────────────
+        self.rewards = _CP5RewardsCfg()
+
+        # ── disable the locomotion velocity command (not used in CP5) ─────────
+        self.commands.base_velocity = None
+
+        # ── add waypoint initialisation event ─────────────────────────────────
+        self.events.init_waypoints = EventTerm(
+            func=nav_mdp.init_waypoints,
+            mode="reset",
+        )
+
+        # ── timing: nav policy at 5 Hz, loco policy at 50 Hz ─────────────────
+        # sim.dt = 0.005 s (set by base)
+        # low_level_decimation = 4 → loco every 4 apply_actions calls
+        # nav decimation = 40 → nav policy every 40 sim steps = 0.2 s = 5 Hz
+        self.decimation = 40
+        self.sim.render_interval = 4      # render every 4 sim steps (50 Hz)
+        self.episode_length_s = 30.0      # 30 s per episode = 150 nav steps
+
+        # ── sensor update periods ─────────────────────────────────────────────
+        if self.scene.contact_forces is not None:
+            self.scene.contact_forces.update_period = self.sim.dt
+        if self.scene.height_scanner is not None:
+            self.scene.height_scanner.update_period = (
+                self.actions.pre_trained_policy_action.low_level_decimation
+                * self.sim.dt
+            )
+
+
+@configclass
+class NeuroGaitNavigationCP5EnvCfg_PLAY(NeuroGaitNavigationCP5EnvCfg):
+    """Single-env play config for evaluating a trained CP5 nav policy."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.scene.num_envs    = 1
+        self.scene.env_spacing = 2.5
+        self.scene.terrain.max_init_terrain_level = None
+
+        # Longer episodes for evaluation
+        self.episode_length_s = 60.0
 
         if getattr(self.scene.terrain, "terrain_generator", None) is not None:
             self.scene.terrain.terrain_generator.num_rows   = 5

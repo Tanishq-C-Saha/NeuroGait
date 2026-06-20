@@ -179,3 +179,53 @@ def occupancy_grid_obs_gpu(env: ManagerBasedEnv) -> torch.Tensor:
     grids.scatter_(1, linear_idx, in_bounds.float())
 
     return grids
+
+
+# ── CP5: navigation policy observations ───────────────────────────────────────
+
+
+def _robot_yaw(quat_wxyz: torch.Tensor) -> torch.Tensor:
+    """Extract yaw angle from Isaac Lab (w, x, y, z) quaternion batch."""
+    w, x, y, z = quat_wxyz[:, 0], quat_wxyz[:, 1], quat_wxyz[:, 2], quat_wxyz[:, 3]
+    return torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+
+def goal_vector_obs(env) -> torch.Tensor:
+    """Goal vector in robot frame: [dir_x, dir_y, norm_distance].
+
+    Returns (num_envs, 3) float32. Normalised direction to current A* waypoint
+    in the robot's base frame, plus distance clamped to [0,1] (10 m range).
+    Returns zeros if waypoints are not initialised yet.
+    """
+    if not hasattr(env, "_curr_waypoint_pos"):
+        return torch.zeros(env.num_envs, 3, device=env.device)
+
+    robot_xy = env.scene["robot"].data.root_pos_w[:, :2]
+    robot_quat = env.scene["robot"].data.root_quat_w
+    yaw = _robot_yaw(robot_quat)
+
+    dx = env._curr_waypoint_pos[:, 0] - robot_xy[:, 0]
+    dy = env._curr_waypoint_pos[:, 1] - robot_xy[:, 1]
+    dist = torch.sqrt(dx * dx + dy * dy).clamp(min=0.1)
+
+    # rotate world-frame delta into robot frame
+    cos_yaw = torch.cos(yaw)
+    sin_yaw = torch.sin(yaw)
+    local_x = cos_yaw * dx + sin_yaw * dy
+    local_y = -sin_yaw * dx + cos_yaw * dy
+
+    dir_x = local_x / dist
+    dir_y = local_y / dist
+    norm_dist = dist.clamp(max=10.0) / 10.0
+
+    return torch.stack([dir_x, dir_y, norm_dist], dim=-1)
+
+
+def robot_velocity_obs(env) -> torch.Tensor:
+    """Robot base velocity in base frame: [vx, vy, yaw_rate].
+
+    Returns (num_envs, 3) float32.
+    """
+    lin_vel = env.scene["robot"].data.root_lin_vel_b[:, :2]   # (E, 2)
+    ang_vel = env.scene["robot"].data.root_ang_vel_b[:, 2:3]  # (E, 1)
+    return torch.cat([lin_vel, ang_vel], dim=-1)
