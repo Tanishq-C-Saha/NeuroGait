@@ -60,8 +60,8 @@ class NavigationBaseEnvCfg(ManagerBasedRLEnvCfg):
             self.scene.contact_forces.update_period = self.sim.dt
 
         if getattr(self.curriculum, "terrain_levels", None) is not None:
-            if self.scene.terrain.terrain_generator is not None:
+            if getattr(self.scene.terrain, "terrain_generator", None) is not None:
                 self.scene.terrain.terrain_generator.curriculum = True
         else:
-            if self.scene.terrain.terrain_generator is not None:
+            if getattr(self.scene.terrain, "terrain_generator", None) is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
