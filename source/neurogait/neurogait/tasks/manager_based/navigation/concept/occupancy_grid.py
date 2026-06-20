@@ -31,54 +31,40 @@ def points_to_occupancy_grid(points_xyz, grid_size_m, resolution_m, max_height_m
     ignored -- e.g. ground points (z near 0) and ceiling/
     sky points (z very high) shouldn't count as "obstacles"
 
-    Returns: a 2D numpy array of shape (n_cells, n_cells), where
-    1 = occupied, 0 = free.
+    Returns: a 2D numpy array of shape (n_cells, n_cells), dtype uint8,
+    where 1 = occupied, 0 = free.
     """
-    n_cells = int(grid_size_m / resolution_m)
-    grid = np.zeros((n_cells, n_cells), dtype=int)
-
-    # the robot sits at the CENTER of this grid, not the corner.
-    # so a point at (x=0, y=0) -- right at the robot's feet -- should
-    # map to the middle cell, not cell (0,0).
+    n_cells    = int(grid_size_m / resolution_m)
     center_cell = n_cells // 2
 
-    for x, y, z in points_xyz:
-        # step 1: ignore points that are ground-level or very high up --
-        # these aren't "obstacles", they're floor noise or sky/ceiling
-        if z < min_height_m or z > max_height_m:
-            continue
+    points_xyz = np.asarray(points_xyz, dtype=np.float32)
 
-        # step 2: convert this point's real-world (x,y) offset from the
-        # robot into a grid cell index. Dividing by resolution tells us
-        # "how many cells away from center is this point", then we
-        # round to the nearest whole cell and shift by center_cell so
-        # the robot's own position lands in the middle of the grid.
-        col_offset = int(round(x / resolution_m))
-        row_offset = int(round(y / resolution_m))
+    # ── step 1: height filter ────────────────────────────────────────────────
+    # Ignore ground returns (z ≈ 0) and sky / ceiling (z very high).
+    # We keep only points whose z sits in the "obstacle band" [min, max].
+    z = points_xyz[:, 2]
+    valid = (z >= min_height_m) & (z <= max_height_m)
+    pts   = points_xyz[valid]                        # (M, 3), M ≤ N
 
-        row = center_cell - row_offset  # NOTE: see explanation below
-        col = center_cell + col_offset
+    # ── step 2: (x, y) → (col, row) ─────────────────────────────────────────
+    # Forward distance  x  maps to column  (col increases forward on screen).
+    # Lateral distance  y  maps to row     (row decreases going left, because
+    # row 0 is the TOP of the displayed image — same convention as imshow and
+    # your A* grid work).  Subtracting instead of adding flips the direction.
+    cols = center_cell + np.rint(pts[:, 0] / resolution_m).astype(np.int32)
+    rows = center_cell - np.rint(pts[:, 1] / resolution_m).astype(np.int32)
 
-        # step 3: ignore points that fall outside the grid entirely
-        # (e.g. something very far away, beyond our grid's coverage)
-        if 0 <= row < n_cells and 0 <= col < n_cells:
-            grid[row, col] = 1
+    # ── step 3: clip to grid bounds ──────────────────────────────────────────
+    # Points further away than grid_size_m/2 fall outside — just ignore them.
+    in_bounds = (rows >= 0) & (rows < n_cells) & (cols >= 0) & (cols < n_cells)
+    rows = rows[in_bounds]
+    cols = cols[in_bounds]
 
-            return grid
+    # ── step 4: mark grid (vectorised fancy indexing, no Python loop) ────────
+    grid = np.zeros((n_cells, n_cells), dtype=np.uint8)
+    grid[rows, cols] = 1
 
-
-        # -----------------------------------------------------------------
-        # WHY row = center - row_offset (not center + row_offset)?
-        #
-        # We're treating row 0 as the TOP of the grid (matching how images
-        # and matplotlib's imshow are normally displayed -- row increases
-        # DOWNWARD on screen). But y (left) increases to the LEFT in robot-
-        # frame convention. So a point to the robot's LEFT (positive y)
-        # should appear toward the TOP of the displayed grid (smaller row
-        # number), not the bottom. Subtracting gets this orientation right.
-        # This is exactly the same row/col-vs-x/y care from your A* work --
-        # always worth being explicit about, never assumed.
-        # -----------------------------------------------------------------
+    return grid
 
 
 if __name__ == "__main__":
