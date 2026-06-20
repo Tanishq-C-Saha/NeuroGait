@@ -6,25 +6,27 @@ Convention:
     col  ↔  X axis   (col 0 = min X = origin_x)
 
 Obstacle inflation (C-space mapping):
-    Each obstacle is inflated by (robot_half_extent + safety_margin) = 0.50 m.
+    Each obstacle is inflated by (robot_half_width + safety_margin) = 0.30 m.
     This maps the workspace problem into C-space: A* plans for the robot *centre*,
     and the inflated cells guarantee the robot body never touches an obstacle edge.
 
     Go2 body:       ~0.67 m long × 0.31 m wide
-    Half-diagonal:   sqrt(0.335^2 + 0.155^2) ≈ 0.37 m  (conservative circle)
-    Safety margin:   0.13 m
-    Total inflation: 0.50 m  (2.5 cells at 0.20 m/cell)
+    Half-width:      0.155 m  (perpendicular to travel — relevant dimension)
+    Safety margin:   0.145 m  (14.5 cm of true clearance from obstacle edge)
+    Total inflation: 0.30 m  (1.5 cells at 0.20 m/cell)
 
-    Without this: robot centre would be only ~0.05 m from obstacle edge —
-    far too tight for the 0.31 m wide Go2 body to pass safely.
+    Using the diagonal half-extent (0.37 m) was too conservative: it caused
+    all obstacles to merge into one black blob with no navigable corridors.
+    For a robot travelling primarily forward, the half-WIDTH (not diagonal)
+    is the relevant clearance dimension.
 """
 
 import numpy as np
 
 # --- robot body constants (Unitree Go2) ---
-_ROBOT_HALF_WIDTH = 0.37    # diagonal half-extent of Go2 body (conservative circle approx)
-_SAFETY_MARGIN    = 0.13    # additional safety buffer beyond robot body
-_INFLATION_M      = _ROBOT_HALF_WIDTH + _SAFETY_MARGIN   # 0.50 m total C-space inflation
+_ROBOT_HALF_WIDTH = 0.155   # half of body width (0.31 m) — relevant when travelling forward
+_SAFETY_MARGIN    = 0.145   # additional safety buffer beyond robot body edge
+_INFLATION_M      = _ROBOT_HALF_WIDTH + _SAFETY_MARGIN   # 0.30 m total C-space inflation
 
 _DEFAULT_RADIUS   = 0.50    # fallback footprint when config cannot be read
 
@@ -34,8 +36,8 @@ def build_global_grid(env, grid_resolution=0.2, grid_size=200):
     Reads obstacle positions from env.scene rigid objects and rasterises
     them into a 2D binary occupancy grid.
 
-    Each obstacle is inflated by _INFLATION_M so planning on this grid
-    gives the robot body (not just its centre) sufficient clearance.
+    Each obstacle is inflated by _INFLATION_M (0.30 m) so planning on this
+    grid gives the robot body (not just its centre) sufficient clearance.
 
     Args:
         env            : ManagerBasedRLEnv instance
