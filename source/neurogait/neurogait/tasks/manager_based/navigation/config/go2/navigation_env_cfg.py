@@ -6,6 +6,8 @@
 from isaaclab.utils import configclass
 
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
+from isaaclab.sensors import CameraCfg
+import isaaclab.sim as sim_utils
 
 ##
 # Pre-defined configs
@@ -32,6 +34,17 @@ class NeuroGaitNavigationCP1EnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.terrain.terrain_generator.sub_terrains["boxes"].grid_height_range = (0.025, 0.1)
         self.scene.terrain.terrain_generator.sub_terrains["random_rough"].noise_range = (0.01, 0.06)
         self.scene.terrain.terrain_generator.sub_terrains["random_rough"].noise_step = 0.01
+        self.scene.camera = CameraCfg(
+                prim_path="{ENV_REGEX_NS}/Robot/base/front_cam",
+                update_period=0.1,
+                height=480,
+                width=640,
+                data_types=["rgb", "distance_to_image_plane"],
+                spawn=sim_utils.PinholeCameraCfg(
+                    focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+                ),
+                offset=CameraCfg.OffsetCfg(pos=(0.3, 0.0, 0.1), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
+            )
 
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
