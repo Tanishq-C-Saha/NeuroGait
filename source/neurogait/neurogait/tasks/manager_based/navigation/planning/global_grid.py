@@ -4,13 +4,29 @@ Build a 2D global occupancy grid from env.scene rigid object positions.
 Convention:
     row  ↔  Y axis   (row 0 = min Y = origin_y)
     col  ↔  X axis   (col 0 = min X = origin_x)
+
+Obstacle inflation (C-space mapping):
+    Each obstacle is inflated by (robot_half_extent + safety_margin) = 0.50 m.
+    This maps the workspace problem into C-space: A* plans for the robot *centre*,
+    and the inflated cells guarantee the robot body never touches an obstacle edge.
+
+    Go2 body:       ~0.67 m long × 0.31 m wide
+    Half-diagonal:   sqrt(0.335^2 + 0.155^2) ≈ 0.37 m  (conservative circle)
+    Safety margin:   0.13 m
+    Total inflation: 0.50 m  (2.5 cells at 0.20 m/cell)
+
+    Without this: robot centre would be only ~0.05 m from obstacle edge —
+    far too tight for the 0.31 m wide Go2 body to pass safely.
 """
 
 import numpy as np
 
+# --- robot body constants (Unitree Go2) ---
+_ROBOT_HALF_WIDTH = 0.37    # diagonal half-extent of Go2 body (conservative circle approx)
+_SAFETY_MARGIN    = 0.13    # additional safety buffer beyond robot body
+_INFLATION_M      = _ROBOT_HALF_WIDTH + _SAFETY_MARGIN   # 0.50 m total C-space inflation
 
-_INFLATION_M = 0.2   # extra clearance around every obstacle (one cell at 0.2 m/cell)
-_DEFAULT_RADIUS = 0.5  # fallback footprint if size cannot be read from config
+_DEFAULT_RADIUS   = 0.50    # fallback footprint when config cannot be read
 
 
 def build_global_grid(env, grid_resolution=0.2, grid_size=200):
@@ -18,14 +34,18 @@ def build_global_grid(env, grid_resolution=0.2, grid_size=200):
     Reads obstacle positions from env.scene rigid objects and rasterises
     them into a 2D binary occupancy grid.
 
+    Each obstacle is inflated by _INFLATION_M so planning on this grid
+    gives the robot body (not just its centre) sufficient clearance.
+
     Args:
         env            : ManagerBasedRLEnv instance
         grid_resolution: metres per cell
         grid_size      : cells per side
 
     Returns:
-        grid   : np.ndarray (grid_size, grid_size) uint8, 0=free 1=occupied
-        origin : (float, float) world (x, y) of grid cell (0, 0)
+        grid          : np.ndarray (grid_size, grid_size) uint8, 0=free 1=occupied
+        origin        : (float, float) world (x, y) of grid cell (0, 0)
+        obstacle_info : list of dicts {name, x, y, shape, sx, sy, inflate_r}
     """
     print("[CP4] Building global occupancy grid...")
 
@@ -33,8 +53,9 @@ def build_global_grid(env, grid_resolution=0.2, grid_size=200):
     origin = (-half, -half)
 
     grid = np.zeros((grid_size, grid_size), dtype=np.uint8)
+    obstacle_info = []
 
-    rigid_objects = env.scene.rigid_objects  # dict[str, RigidObject]
+    rigid_objects = env.scene.rigid_objects
     n_rasterized = 0
 
     for name, obj in rigid_objects.items():
@@ -44,15 +65,13 @@ def build_global_grid(env, grid_resolution=0.2, grid_size=200):
         if not any(k in name_lower for k in ("obstacle", "cube", "cyl")):
             continue
 
-        # world (x, y) of this obstacle in env 0
         pos_w = obj.data.root_pos_w[0].cpu().numpy()
         ox, oy = float(pos_w[0]), float(pos_w[1])
 
-        # footprint radius from spawn config
-        radius = _get_footprint_radius(obj)
-        inflate_r = radius + _INFLATION_M
+        shape, sx, sy = _get_shape_info(obj)
+        obs_radius = max(sx, sy) / 2.0          # obstacle half-extent
+        inflate_r  = obs_radius + _INFLATION_M  # C-space inflation
 
-        # bounding box of cells to check
         c_min = max(0, int((ox - inflate_r - origin[0]) / grid_resolution))
         c_max = min(grid_size - 1, int((ox + inflate_r - origin[0]) / grid_resolution))
         r_min = max(0, int((oy - inflate_r - origin[1]) / grid_resolution))
@@ -60,32 +79,38 @@ def build_global_grid(env, grid_resolution=0.2, grid_size=200):
 
         for r in range(r_min, r_max + 1):
             for c in range(c_min, c_max + 1):
-                # world centre of this cell
                 cx = origin[0] + (c + 0.5) * grid_resolution
                 cy = origin[1] + (r + 0.5) * grid_resolution
                 if (cx - ox) ** 2 + (cy - oy) ** 2 <= inflate_r ** 2:
                     grid[r, c] = 1
 
+        obstacle_info.append({
+            "name": name, "x": ox, "y": oy,
+            "shape": shape, "sx": sx, "sy": sy,
+            "inflate_r": inflate_r,
+        })
         n_rasterized += 1
 
-    print(f"[CP4] Grid built: {grid_size}x{grid_size}, {n_rasterized} obstacles rasterized")
-    return grid, origin
+    occ_cells = int(grid.sum())
+    print(f"[CP4] Grid built: {grid_size}x{grid_size} cells @ {grid_resolution}m/cell, "
+          f"{n_rasterized} obstacles rasterized, {occ_cells} occupied cells "
+          f"(C-space inflation per obstacle = {_INFLATION_M:.2f} m)")
+    return grid, origin, obstacle_info
 
 
-def _get_footprint_radius(obj):
-    """Return the half-width footprint radius of a rigid object."""
+def _get_shape_info(obj):
+    """Return (shape_str, sx, sy) for the object's spawn config."""
     try:
         spawn = obj.cfg.spawn
-        # CuboidCfg has .size = (sx, sy, sz)
         if hasattr(spawn, "size"):
             sx, sy, _ = spawn.size
-            return max(sx, sy) / 2.0
-        # CylinderCfg / SphereCfg have .radius
+            return "cuboid", float(sx), float(sy)
         if hasattr(spawn, "radius"):
-            return float(spawn.radius)
+            r = float(spawn.radius)
+            return "cylinder", r * 2, r * 2
     except Exception:
         pass
-    return _DEFAULT_RADIUS
+    return "unknown", _DEFAULT_RADIUS * 2, _DEFAULT_RADIUS * 2
 
 
 def world_to_grid(world_xy, origin, resolution):
