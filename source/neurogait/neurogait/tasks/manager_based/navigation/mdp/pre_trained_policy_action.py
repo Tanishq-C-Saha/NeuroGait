@@ -86,8 +86,17 @@ class PreTrainedPolicyAction(ActionTerm):
     def processed_actions(self) -> torch.Tensor:
         return self.raw_actions
 
+    # Locomotion training ranges (UniformVelocityCommandCfg in commands.py):
+    #   vx ∈ [-1.0, 1.0],  vy ∈ [-1.0, 1.0],  yaw_rate ∈ [-1.0, 1.0]
+    # With heading_command=True the loco policy saw derived yaw_rates, but the
+    # observation it received was still [vx, vy, yaw_rate] all clipped to ±1.
+    # Clamping here keeps the nav policy's GaussianMixin output in-distribution
+    # during the early, random phase of training when it outputs arbitrary values.
+    _LOCO_ACTION_LIMIT = torch.tensor([1.0, 1.0, 1.0])  # per-dim, set once
+
     def process_actions(self, actions: torch.Tensor):
-        self._raw_actions[:] = actions
+        limit = self._LOCO_ACTION_LIMIT.to(actions.device)
+        self._raw_actions[:] = actions.clamp(-limit, limit)
 
     def apply_actions(self):
         if self._counter % self.cfg.low_level_decimation == 0:
