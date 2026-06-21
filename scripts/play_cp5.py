@@ -84,7 +84,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
         print("[WARN] No checkpoint supplied — running random policy.")
 
     # switch to eval mode (disables exploration noise in GaussianMixin)
-    runner.agent.set_running_mode("eval")
+    runner.agent.enable_training_mode(False ,apply_to_models=True )
 
     # reset
     obs, info = env.reset()
@@ -94,10 +94,27 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
     with torch.no_grad():
         while simulation_app.is_running() and step < args_cli.max_steps:
             # nav policy inference
-            actions, _, _ = runner.agent.act(obs, timestep=0, timesteps=0)
+            #actions = runner.agent.act(obs,obs,timestep=0, timesteps=0)
+            result = runner.agent.act(obs,obs, timestep=0, timesteps=0)
+            actions = result[0] if isinstance(result, tuple) else result
+
 
             # step environment (PreTrainedPolicyAction handles loco internally)
             obs, rewards, terminated, truncated, info = env.step(actions)
+
+            # ── velocity command verification (every 10 steps) ───────────────
+            if step % 10 == 0:
+                raw_env  = env.unwrapped
+                nav_cmd  = actions[0].cpu().numpy()                              # [vx, vy, yaw]
+                lin_vel  = raw_env.scene["robot"].data.root_lin_vel_b[0].cpu().numpy()
+                ang_rate = float(raw_env.scene["robot"].data.root_ang_vel_b[0, 2].item())
+                pos      = raw_env.scene["robot"].data.root_pos_w[0].cpu().numpy()
+                print(
+                    f"step {step:4d} | "
+                    f"CMD vx={nav_cmd[0]:+.3f} vy={nav_cmd[1]:+.3f} yaw={nav_cmd[2]:+.3f} | "
+                    f"ACT vx={lin_vel[0]:+.3f} vy={lin_vel[1]:+.3f} yaw={ang_rate:+.3f} | "
+                    f"POS ({pos[0]:.2f}, {pos[1]:.2f})"
+                )
 
             done = terminated | truncated
             if done.any():
