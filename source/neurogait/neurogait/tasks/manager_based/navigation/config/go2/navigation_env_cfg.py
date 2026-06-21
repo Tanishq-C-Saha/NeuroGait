@@ -23,7 +23,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import CameraCfg
-from isaaclab.sensors.ray_caster import RayCasterCameraCfg, patterns
+from isaaclab.sensors.ray_caster import MultiMeshRayCasterCameraCfg, patterns
 from isaaclab.utils import configclass
 
 from neurogait.tasks.manager_based.navigation.navigation_base_env_cfg import (
@@ -285,10 +285,10 @@ class NeuroGaitNavigationCP5EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
         # Replaces CameraCfg — same depth output, ~100x lower GPU cost.
         # Enables training with 1024+ envs (was limited to ~12 with CameraCfg).
         # 80×60 is sufficient for a 40×40 occupancy grid at 0.2 m/cell.
-        self.scene.camera = RayCasterCameraCfg(
+        self.scene.camera = MultiMeshRayCasterCameraCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base",
             update_period=0.2,  # once per nav step (decimation=40, sim.dt=0.005)
-            offset=RayCasterCameraCfg.OffsetCfg(
+            offset=MultiMeshRayCasterCameraCfg.OffsetCfg(
                 pos=(0.3, 0.0, 0.1),
                 rot=(0.5, -0.5, 0.5, -0.5),
                 convention="ros",
