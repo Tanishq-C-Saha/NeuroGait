@@ -294,7 +294,11 @@ class NeuroGaitNavigationCP5EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
                 convention="ros",
             ),
             data_types=["distance_to_image_plane"],
-            mesh_prim_paths=["/World/terrain"],
+            mesh_prim_paths=[
+                "/World/ground",                      # flat terrain plane (TerrainImporterCfg prim_path)
+                "{ENV_REGEX_NS}/obstacle_cube_.*",    # box obstacles
+                "{ENV_REGEX_NS}/obstacle_cyl_.*",     # cylinder obstacles
+            ],
             pattern_cfg=patterns.PinholeCameraPatternCfg(
                 focal_length=24.0,
                 horizontal_aperture=20.955,
