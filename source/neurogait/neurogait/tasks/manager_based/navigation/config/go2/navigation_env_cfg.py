@@ -23,6 +23,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import CameraCfg
+from isaaclab.sensors.ray_caster import RayCasterCameraCfg, patterns
 from isaaclab.utils import configclass
 
 from neurogait.tasks.manager_based.navigation.navigation_base_env_cfg import (
@@ -243,7 +244,7 @@ class _CP5RewardsCfg:
 
     progress = RewTerm(
         func=nav_mdp.reward_progress,
-        weight=1.0,
+        weight=2.0,
     )
 
     heading = RewTerm(
@@ -262,7 +263,7 @@ class _CP5RewardsCfg:
 
     smoothness = RewTerm(
         func=nav_mdp.penalty_smoothness,
-        weight=0.1,
+        weight=0.01,
     )
 
 
@@ -280,23 +281,25 @@ class NeuroGaitNavigationCP5EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        # ── depth camera (same as CP1/CP3) ────────────────────────────────────
-        self.scene.camera = CameraCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base/front_cam",
-            update_period=0.1,
-            height=480,
-            width=640,
-            data_types=["rgb", "distance_to_image_plane"],
-            spawn=sim_utils.PinholeCameraCfg(
-                focal_length=24.0,
-                focus_distance=400.0,
-                horizontal_aperture=20.955,
-                clipping_range=(0.1, 1.0e5),
-            ),
-            offset=CameraCfg.OffsetCfg(
+        # ── depth camera: RayCasterCamera (Warp raycasting, no RTX renderer) ──
+        # Replaces CameraCfg — same depth output, ~100x lower GPU cost.
+        # Enables training with 1024+ envs (was limited to ~12 with CameraCfg).
+        # 80×60 is sufficient for a 40×40 occupancy grid at 0.2 m/cell.
+        self.scene.camera = RayCasterCameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            update_period=0.2,  # once per nav step (decimation=40, sim.dt=0.005)
+            offset=RayCasterCameraCfg.OffsetCfg(
                 pos=(0.3, 0.0, 0.1),
                 rot=(0.5, -0.5, 0.5, -0.5),
                 convention="ros",
+            ),
+            data_types=["distance_to_image_plane"],
+            mesh_prim_paths=["/World/terrain"],
+            pattern_cfg=patterns.PinholeCameraPatternCfg(
+                focal_length=24.0,
+                horizontal_aperture=20.955,
+                height=60,
+                width=80,
             ),
         )
 
@@ -323,7 +326,7 @@ class NeuroGaitNavigationCP5EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
         # low_level_decimation = 4 → loco every 4 apply_actions calls
         # nav decimation = 40 → nav policy every 40 sim steps = 0.2 s = 5 Hz
         self.decimation = 40
-        self.sim.render_interval = 4      # render every 4 sim steps (50 Hz)
+        self.sim.render_interval = 40     # match high-level decimation (no warning)
         self.episode_length_s = 30.0      # 30 s per episode = 150 nav steps
 
         # ── sensor update periods ─────────────────────────────────────────────

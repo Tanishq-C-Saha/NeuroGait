@@ -68,8 +68,8 @@ def occupancy_grid_obs(env: ManagerBasedEnv) -> torch.Tensor:
     K_mats = camera.data.intrinsic_matrices                   # (E, 3, 3)
 
     # ── 2. NaN guard — camera pose is NaN on the very first physics step ─────
-    pos_w  = camera.data.pos_w         # (E, 3)
-    quat_w = camera.data.quat_w_ros    # (E, 4)
+    pos_w  = camera.data.pos_w                                                   # (E, 3)
+    quat_w = getattr(camera.data, "quat_w_ros", camera.data.quat_w_world)       # (E, 4)
 
     if torch.isnan(pos_w).any() or torch.isnan(quat_w).any():
         return torch.zeros(env.num_envs, _FLAT_OBS_DIM,
@@ -133,7 +133,7 @@ def occupancy_grid_obs_gpu(env: ManagerBasedEnv) -> torch.Tensor:
     depth  = camera.data.output["distance_to_image_plane"]
     K_mats = camera.data.intrinsic_matrices
     pos_w  = camera.data.pos_w
-    quat_w = camera.data.quat_w_ros
+    quat_w = getattr(camera.data, "quat_w_ros", camera.data.quat_w_world)
 
     if torch.isnan(pos_w).any() or torch.isnan(quat_w).any():
         return torch.zeros(env.num_envs, 1600, device=env.device, dtype=torch.float32)
