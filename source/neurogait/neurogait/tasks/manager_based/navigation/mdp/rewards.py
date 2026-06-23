@@ -184,31 +184,27 @@ def cp5_reward_goal_reached(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 def cp5_penalty_collision_velocity_scaled(
     env: ManagerBasedRLEnv,
-    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
+    sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces", body_names="base"),
+    force_threshold: float = 1.0,
 ) -> torch.Tensor:
-    """Velocity-scaled collision penalty.
+    """Velocity-scaled collision penalty for trunk (base) body contact.
 
-    r = -(1 + 4(‖v‖² + ωz²)) × 𝟙[non-foot contact]
+    r = (1 + 4(‖v‖² + ωz²)) × 𝟙[base-body contact force > threshold]
+
+    sensor_cfg should specify body_names="base" so only the trunk is checked.
+    Using ".*" causes all bodies (including feet) to be in body_ids, which
+    makes the internal mask empty → contact always zero.
 
     Adapted from SEA-Nav (Huang et al., 2026), Table III.
-    High-speed collisions cost up to 5× more than low-speed ones.
     """
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     robot = env.scene["robot"]
 
-    # Net force on all non-foot body links (E, num_bodies, 3) → scalar per env
-    forces_w = contact_sensor.data.net_forces_w          # (E, B, 3)
-    force_mag = forces_w.norm(dim=-1)                     # (E, B)
-
-    # Identify foot bodies (names matching ".*foot" — Go2 has FL/FR/RL/RR_foot)
-    try:
-        foot_ids = sensor_cfg.body_ids  # set via SceneEntityCfg(body_names=".*foot")
-        non_foot_mask = torch.ones(force_mag.shape[1], dtype=torch.bool, device=env.device)
-        non_foot_mask[foot_ids] = False
-        contact = (force_mag[:, non_foot_mask] > 1.0).any(dim=-1).float()  # (E,)
-    except Exception:
-        # Fallback: any body with force > 1 N counts as collision
-        contact = (force_mag > 1.0).any(dim=-1).float()
+    # body_ids resolved by Isaac Lab's manager framework against sensor_cfg.body_names
+    forces_w  = contact_sensor.data.net_forces_w                      # (E, B_total, 3)
+    body_ids  = sensor_cfg.body_ids                                    # list of selected body indices
+    force_mag = forces_w[:, body_ids, :].norm(dim=-1)                 # (E, B_selected)
+    contact   = (force_mag.max(dim=-1).values > force_threshold).float()  # (E,)
 
     vx       = robot.data.root_lin_vel_b[:, 0]
     vy       = robot.data.root_lin_vel_b[:, 1]

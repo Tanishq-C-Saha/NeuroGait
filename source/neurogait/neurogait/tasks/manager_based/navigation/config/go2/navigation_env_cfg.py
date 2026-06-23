@@ -199,7 +199,7 @@ class CP5RewardsCfg:
     )
     goal_proximity = RewTerm(
         func=nav_mdp.cp5_reward_goal_proximity,
-        weight=3.0,
+        weight=0.1,   # was 3.0 — reduced to prevent 10× dominance over velocity_toward_goal
     )
     goal_reached = RewTerm(
         func=nav_mdp.cp5_reward_goal_reached,
@@ -209,7 +209,8 @@ class CP5RewardsCfg:
         func=nav_mdp.cp5_penalty_collision_velocity_scaled,
         weight=-5.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*"),
+            # "base" body only — avoids false-zero from masking all bodies with ".*"
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names="base"),
         },
     )
     stuck = RewTerm(
@@ -242,8 +243,9 @@ class NeuroGaitNavigationCP5EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
         # navigation decimation = 40 → nav step    = 40 × 0.005 = 0.20 s = 5 Hz
         self.sim.dt             = 0.005
         self.decimation         = 40
+        self.scene.env_spacing  = 10
         self.sim.render_interval = self.decimation   # CRITICAL: must equal decimation
-        self.episode_length_s   = 30.0
+        self.episode_length_s   = 120
 
         # ── 2. Replace actions with PreTrainedPolicyActionCfg ─────────────────
         self.actions.joint_pos = None                              # disable loco joint action
