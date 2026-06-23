@@ -12,50 +12,43 @@ Run:
 """
 
 import argparse
-import sys
-import os
+import math
 
 from isaaclab.app import AppLauncher
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "rsl_rl"))
-
 parser = argparse.ArgumentParser(description="CP5 reward scale test")
-parser.add_argument("--task",     type=str, default="NeuroGait-Navigation-CP5-v0")
 parser.add_argument("--num_envs", type=int, default=256)
 parser.add_argument("--steps",    type=int, default=100)
 AppLauncher.add_app_launcher_args(parser)
-args_cli, hydra_args = parser.parse_known_args()
-sys.argv = [sys.argv[0]] + hydra_args
+args_cli = parser.parse_args()
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 import torch
 import gymnasium as gym
-from isaaclab_tasks.utils.hydra import hydra_task_config
-from isaaclab.envs import ManagerBasedRLEnvCfg
 
 import neurogait.tasks  # noqa: F401
+from neurogait.tasks.manager_based.navigation.config.go2.navigation_env_cfg import (
+    NeuroGaitNavigationCP5EnvCfg,
+)
 
 
-@hydra_task_config(args_cli.task, "skrl_cfg_entry_point")
-def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
+def main():
+    env_cfg = NeuroGaitNavigationCP5EnvCfg()
     env_cfg.scene.num_envs = args_cli.num_envs
-    env_cfg.sim.device = args_cli.device or env_cfg.sim.device
+    env_cfg.sim.device     = args_cli.device or env_cfg.sim.device
 
-    env = gym.make(args_cli.task, cfg=env_cfg)
+    env = gym.make("NeuroGait-Navigation-CP5-v0", cfg=env_cfg)
     env.reset()
 
-    # Collect reward term sums over N steps
     reward_accum = {}
     for _ in range(args_cli.steps):
         if not simulation_app.is_running():
             break
         actions = torch.rand(args_cli.num_envs, 3, device=env_cfg.sim.device) * 2 - 1
-        # Scale heading to [-π, π]
-        import math
-        actions[:, 2] *= math.pi
-        _, rewards, _, info = env.step(actions)
+        actions[:, 2] *= math.pi   # scale heading to [-π, π]
+        _, _, _, _, info = env.step(actions)
 
         for key, val in info.get("episode", {}).items():
             if key.startswith("reward/") or key.startswith("rew/"):
@@ -63,7 +56,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
                 reward_accum[name] = reward_accum.get(name, 0.0) + float(val.mean())
 
     print("\n" + "=" * 60)
-    print("CP5 Reward Scale Check  (256 envs × 100 random-action steps)")
+    print(f"CP5 Reward Scale Check  ({args_cli.num_envs} envs × {args_cli.steps} random-action steps)")
     print("=" * 60)
     print(f"{'Term':<35} {'Mean/step':>10}")
     print("-" * 60)
