@@ -212,26 +212,46 @@ def _cp5_init_waypoint_state(env) -> None:
     from neurogait.tasks.manager_based.navigation.planning.global_grid import build_global_grid
     from neurogait.tasks.manager_based.navigation.planning.planner import AStarPlanner
 
+    import numpy as np
+
     robot = env.scene["robot"]
+
+    # env.scene.env_origins: (E, 3) — world XY origin for every parallel env.
+    # Plan A* once in env-0's world frame, then convert to LOCAL space and
+    # reapply per-env offsets so all envs get a correctly-placed path.
+    env0_origin_np = env.scene.env_origins[0, :2].cpu().numpy()   # (2,)
+
     robot_pos_np = robot.data.root_pos_w[0].cpu().numpy()
     start_xy = (float(robot_pos_np[0]), float(robot_pos_np[1]))
 
+    # Goal in env-0 world space: local offset (8, 0) + env-0 origin
+    goal_world = (
+        float(env0_origin_np[0]) + _CP5_GOAL_XY[0],
+        float(env0_origin_np[1]) + _CP5_GOAL_XY[1],
+    )
+
     grid, origin, _ = build_global_grid(env)
     planner = AStarPlanner(grid, origin, resolution=_CP5_RESOLUTION_M)
-    waypoints = planner.plan(start_xy, _CP5_GOAL_XY)
+    waypoints = planner.plan(start_xy, goal_world)
 
     if not waypoints:
         # Fallback: straight line from start to goal at 1 m intervals
-        import numpy as np
-        dx = _CP5_GOAL_XY[0] - start_xy[0]
-        dy = _CP5_GOAL_XY[1] - start_xy[1]
+        dx = goal_world[0] - start_xy[0]
+        dy = goal_world[1] - start_xy[1]
         dist = math.sqrt(dx ** 2 + dy ** 2)
         n = max(int(dist), 2)
         waypoints = [(start_xy[0] + dx * i / n, start_xy[1] + dy * i / n)
                      for i in range(1, n + 1)]
         print("[CP5] Warning: A* failed, using straight-line fallback path")
 
-    env._cp5_waypoints = torch.tensor(waypoints, dtype=torch.float32, device=env.device)  # (W, 2)
+    # Convert world waypoints (env 0) → local (relative to env-0 origin)
+    local_wp_np = np.array(waypoints, dtype=np.float32) - env0_origin_np  # (W, 2)
+
+    # Broadcast to per-env world positions: (E, W, 2)
+    local_wp   = torch.tensor(local_wp_np, dtype=torch.float32, device=env.device)      # (W, 2)
+    env_origins_xy = env.scene.env_origins[:, :2]                                        # (E, 2)
+    env._cp5_waypoints = local_wp.unsqueeze(0) + env_origins_xy.unsqueeze(1)            # (E, W, 2)
+
     env._cp5_wp_idx    = torch.zeros(env.num_envs, dtype=torch.long,    device=env.device)  # (E,)
     env._cp5_prev_dist = torch.full((env.num_envs,), float("inf"),
                                     dtype=torch.float32, device=env.device)
@@ -239,8 +259,9 @@ def _cp5_init_waypoint_state(env) -> None:
     # Position history for stuck detection: (E, 20, 2)
     env._cp5_pos_history = torch.zeros(env.num_envs, 20, 2, dtype=torch.float32, device=env.device)
     env._cp5_pos_hist_idx = 0
-    print(f"[CP5] Waypoint state initialised: {len(waypoints)} waypoints, "
-          f"goal={_CP5_GOAL_XY}")
+    W = local_wp_np.shape[0]
+    print(f"[CP5] Waypoint state initialised: {W} waypoints, "
+          f"local goal={_CP5_GOAL_XY}, {env.num_envs} envs")
 
 
 def _cp5_reset_waypoint_state(env, env_ids) -> None:
@@ -353,18 +374,19 @@ def future_waypoints_obs(env) -> torch.Tensor:
     robot_pos = robot.data.root_pos_w[:, :2]                   # (E, 2)
     robot_yaw = quat_to_yaw_batch(robot.data.root_quat_w)      # (E,)
 
-    # Advance waypoint index when within threshold
-    W = len(env._cp5_waypoints)
-    curr_wp  = env._cp5_waypoints[env._cp5_wp_idx.clamp(max=W - 1)]   # (E, 2)
-    dist_now = torch.norm(curr_wp - robot_pos, dim=-1)                 # (E,)
+    # _cp5_waypoints is (E, W, 2) — one path per env at its world position
+    W        = env._cp5_waypoints.shape[1]
+    E_range  = torch.arange(env.num_envs, device=env.device)
+    curr_wp  = env._cp5_waypoints[E_range, env._cp5_wp_idx.clamp(max=W - 1)]  # (E, 2)
+    dist_now = torch.norm(curr_wp - robot_pos, dim=-1)                          # (E,)
     advance  = (dist_now < _CP5_WAYPOINT_ADVANCE_DIST) & (env._cp5_wp_idx < W - 1)
     env._cp5_wp_idx[advance] += 1
 
     # Encode 3 future waypoints
     obs_parts = []
     for offset in range(_CP5_WP_LOOKAHEAD):
-        idx = (env._cp5_wp_idx + offset).clamp(max=W - 1)   # (E,)
-        wp  = env._cp5_waypoints[idx]                         # (E, 2)
+        idx = (env._cp5_wp_idx + offset).clamp(max=W - 1)    # (E,)
+        wp  = env._cp5_waypoints[E_range, idx]                # (E, 2)
         obs_parts.append(_wp_in_robot_frame(robot_pos, robot_yaw, wp))
 
     return torch.cat(obs_parts, dim=-1)   # (E, 9)

@@ -103,16 +103,18 @@ def stand_still_joint_deviation_l1(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _cp5_current_wp_and_dist(env):
-    """Return (curr_wp_world (E,2), dist (E,)) to the robot's current waypoint."""
+    """Return (curr_wp_world (E,2), dist (E,), robot_xy (E,2))."""
     from neurogait.tasks.manager_based.navigation.mdp.observations import (
         _cp5_init_waypoint_state, quat_to_yaw_batch,
     )
     _cp5_init_waypoint_state(env)
     robot    = env.scene["robot"]
     robot_xy = robot.data.root_pos_w[:, :2]
-    W        = len(env._cp5_waypoints)
-    curr_wp  = env._cp5_waypoints[env._cp5_wp_idx.clamp(max=W - 1)]   # (E, 2)
-    dist     = torch.norm(curr_wp - robot_xy, dim=-1)                  # (E,)
+    # _cp5_waypoints is now (E, W, 2) — one world-space path per env
+    W        = env._cp5_waypoints.shape[1]
+    E_range  = torch.arange(env.num_envs, device=env.device)
+    curr_wp  = env._cp5_waypoints[E_range, env._cp5_wp_idx.clamp(max=W - 1)]  # (E, 2)
+    dist     = torch.norm(curr_wp - robot_xy, dim=-1)                           # (E,)
     return curr_wp, dist, robot_xy
 
 
@@ -164,11 +166,13 @@ def cp5_reward_goal_reached(env: ManagerBasedRLEnv) -> torch.Tensor:
 
     From X-Nav (2025): large one-time signal for episode success.
     """
+    from neurogait.tasks.manager_based.navigation.mdp.observations import _cp5_init_waypoint_state
+    _cp5_init_waypoint_state(env)
     robot    = env.scene["robot"]
     robot_xy = robot.data.root_pos_w[:, :2]
-    W        = len(env._cp5_waypoints)
-    final_wp = env._cp5_waypoints[W - 1]                     # (2,)
-    dist     = torch.norm(final_wp.unsqueeze(0) - robot_xy, dim=-1)
+    W        = env._cp5_waypoints.shape[1]
+    final_wp = env._cp5_waypoints[:, W - 1, :]               # (E, 2) per-env final waypoint
+    dist     = torch.norm(final_wp - robot_xy, dim=-1)
     return (dist < 0.3).float()
 
 
@@ -205,7 +209,7 @@ def cp5_penalty_collision_velocity_scaled(
     yaw_rate = robot.data.root_ang_vel_b[:, 2]
     vel_scale = 1.0 + 4.0 * (vx ** 2 + vy ** 2 + yaw_rate ** 2)
 
-    return -(vel_scale * contact)
+    return vel_scale * contact   # positive magnitude; weight=-5.0 makes this a penalty
 
 
 def cp5_penalty_stuck(env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -234,7 +238,7 @@ def cp5_penalty_stuck(env: ManagerBasedRLEnv) -> torch.Tensor:
     commanding_forward = (nav_actions[:, 0] > 0.1) if nav_actions.shape[-1] >= 1 else torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
 
     stuck  = (max_disp < 0.1) & commanding_forward
-    return -stuck.float()
+    return stuck.float()   # positive magnitude; weight=-3.0 makes this a penalty
 
 
 def cp5_reward_heading(env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -265,4 +269,4 @@ def cp5_penalty_smoothness(env: ManagerBasedRLEnv) -> torch.Tensor:
     curr_action = env.action_manager.action   # (E, 3) — nav policy output
     diff        = (curr_action - env._cp5_prev_action).norm(dim=-1)
     env._cp5_prev_action[:] = curr_action.detach()
-    return -diff
+    return diff   # positive magnitude; weight=-0.01 makes this a penalty
