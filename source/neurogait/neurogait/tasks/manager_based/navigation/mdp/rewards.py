@@ -150,14 +150,20 @@ def cp5_reward_velocity_toward_goal(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 
 def cp5_reward_goal_proximity(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """Dual-scale tanh proximity shaping.
+    """Dual-scale tanh proximity shaping toward the FINAL goal.
 
     r = (1 - tanh(d/5)) + (1 - tanh(d/1))
 
     Adapted from Li et al. (2025), Eq. 1.
-    Smooth gradient at both long (σ=5 m) and short (σ=1 m) ranges.
+    Uses the FINAL waypoint (destination), NOT the current waypoint.
+    This gives a persistent gradient that never resets when the robot
+    advances through intermediate waypoints.
     """
-    _, dist, _ = _cp5_current_wp_and_dist(env)
+    from neurogait.tasks.manager_based.navigation.mdp.observations import _cp5_init_waypoint_state
+    _cp5_init_waypoint_state(env)
+    robot_xy   = env.scene["robot"].data.root_pos_w[:, :2]          # (E, 2)
+    final_goal = env._cp5_waypoints[:, -1, :]                       # (E, 2) per-env destination
+    dist = torch.norm(robot_xy - final_goal, dim=-1)                # (E,)
     return (1.0 - torch.tanh(dist / 5.0)) + (1.0 - torch.tanh(dist / 1.0))
 
 
