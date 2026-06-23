@@ -1,21 +1,21 @@
 """
-CP3 — Occupancy grid observation term for Isaac Lab manager-based envs.
+Navigation observation terms for Isaac Lab manager-based envs.
 
-Plugs into ObservationGroupCfg as a regular observation term:
+CP3 functions (occupancy_grid_obs, occupancy_grid_obs_gpu) — use scene["camera"].
+CP5 functions — use scene["front_cam"] (MultiMeshRayCasterCamera) + waypoint state.
 
-    from neurogait.tasks.manager_based.navigation.mdp import occupancy_grid_obs
+CP5 observation layout (1615 dims total):
+  [0    : 1600]  occupancy_grid_obs_cp5  — 40×40 asymmetric grid (robot at row 10)
+  [1600 : 1609]  future_waypoints_obs    — next 3 waypoints in robot frame (9 dims)
+  [1609 : 1612]  robot_velocity_obs      — [vx, vy, yaw_rate] (3 dims)
+  [1612 : 1615]  projected_gravity       — standard Isaac Lab obs term (3 dims)
 
-    @configclass
-    class MyObsCfg(ObsGroup):
-        occupancy_grid = ObsTerm(func=occupancy_grid_obs)   # → (num_envs, 1600)
-
-The function reads the depth camera that must be added to scene["camera"]
-(already done in navigation_env_cfg.py).  Output is a flattened 40×40
-binary occupancy grid (1600 floats), one per environment.
+Ordering is CRITICAL: CNN in models/navigation_policy.py splits at index 1600.
 """
 
 from __future__ import annotations
 
+import math
 import sys
 import os
 import numpy as np
@@ -179,3 +179,200 @@ def occupancy_grid_obs_gpu(env: ManagerBasedEnv) -> torch.Tensor:
     grids.scatter_(1, linear_idx, in_bounds.float())
 
     return grids
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CP5 observation functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Grid constants (same as CP3 but asymmetric robot placement)
+_CP5_GRID_SIZE_M  = 8.0
+_CP5_RESOLUTION_M = 0.2
+_CP5_N_CELLS      = int(_CP5_GRID_SIZE_M / _CP5_RESOLUTION_M)   # 40
+_CP5_ROBOT_ROW    = 10    # 2 m behind, 6 m ahead (see concept/06_asymmetric_grid.md)
+_CP5_ROBOT_COL    = _CP5_N_CELLS // 2   # 20 — centred laterally
+_CP5_MIN_H        = 0.05
+_CP5_MAX_H        = 2.0
+
+_CP5_WAYPOINT_ADVANCE_DIST = 0.3   # m — advance to next waypoint when within this radius
+_CP5_WP_LOOKAHEAD          = 3     # number of future waypoints to encode
+_CP5_GOAL_XY               = (8.0, 0.0)
+
+
+def _cp5_init_waypoint_state(env) -> None:
+    """Lazy-init A* waypoint state on the env object.
+
+    Runs once on first call.  All envs share the same path (same obstacles).
+    Waypoint state tensors are stored as attributes on env so reward and obs
+    functions can share them without re-running A* every step.
+    """
+    if hasattr(env, "_cp5_waypoints"):
+        return   # already initialised
+
+    from neurogait.tasks.manager_based.navigation.planning.global_grid import build_global_grid
+    from neurogait.tasks.manager_based.navigation.planning.planner import AStarPlanner
+
+    robot = env.scene["robot"]
+    robot_pos_np = robot.data.root_pos_w[0].cpu().numpy()
+    start_xy = (float(robot_pos_np[0]), float(robot_pos_np[1]))
+
+    grid, origin, _ = build_global_grid(env)
+    planner = AStarPlanner(grid, origin, resolution=_CP5_RESOLUTION_M)
+    waypoints = planner.plan(start_xy, _CP5_GOAL_XY)
+
+    if not waypoints:
+        # Fallback: straight line from start to goal at 1 m intervals
+        import numpy as np
+        dx = _CP5_GOAL_XY[0] - start_xy[0]
+        dy = _CP5_GOAL_XY[1] - start_xy[1]
+        dist = math.sqrt(dx ** 2 + dy ** 2)
+        n = max(int(dist), 2)
+        waypoints = [(start_xy[0] + dx * i / n, start_xy[1] + dy * i / n)
+                     for i in range(1, n + 1)]
+        print("[CP5] Warning: A* failed, using straight-line fallback path")
+
+    env._cp5_waypoints = torch.tensor(waypoints, dtype=torch.float32, device=env.device)  # (W, 2)
+    env._cp5_wp_idx    = torch.zeros(env.num_envs, dtype=torch.long,    device=env.device)  # (E,)
+    env._cp5_prev_dist = torch.full((env.num_envs,), float("inf"),
+                                    dtype=torch.float32, device=env.device)
+    env._cp5_prev_action = torch.zeros(env.num_envs, 3, dtype=torch.float32, device=env.device)
+    # Position history for stuck detection: (E, 20, 2)
+    env._cp5_pos_history = torch.zeros(env.num_envs, 20, 2, dtype=torch.float32, device=env.device)
+    env._cp5_pos_hist_idx = 0
+    print(f"[CP5] Waypoint state initialised: {len(waypoints)} waypoints, "
+          f"goal={_CP5_GOAL_XY}")
+
+
+def _cp5_reset_waypoint_state(env, env_ids) -> None:
+    """Reset waypoint tracking for terminated environments."""
+    if not hasattr(env, "_cp5_wp_idx"):
+        return
+    env._cp5_wp_idx[env_ids] = 0
+    env._cp5_prev_dist[env_ids] = float("inf")
+    env._cp5_prev_action[env_ids] = 0.0
+    env._cp5_pos_history[env_ids] = 0.0
+
+
+def quat_to_yaw_batch(quat_wxyz: torch.Tensor) -> torch.Tensor:
+    """Batch quaternion (w,x,y,z) → yaw angle. Shape: (E,4) → (E,)."""
+    w, x, y, z = quat_wxyz[:, 0], quat_wxyz[:, 1], quat_wxyz[:, 2], quat_wxyz[:, 3]
+    return torch.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
+
+def _wp_in_robot_frame(robot_pos: torch.Tensor, robot_yaw: torch.Tensor,
+                       wp_world: torch.Tensor) -> torch.Tensor:
+    """Transform waypoints from world to robot frame.
+
+    Args:
+        robot_pos:  (E, 2) world x,y
+        robot_yaw:  (E,)   yaw in radians
+        wp_world:   (E, 2) waypoint world x,y
+
+    Returns:
+        (E, 3) [dir_x, dir_y, norm_dist]  — normalised direction + distance/10
+    """
+    delta = wp_world - robot_pos    # (E, 2)
+    cos_y = torch.cos(-robot_yaw)
+    sin_y = torch.sin(-robot_yaw)
+    dx_r  =  cos_y * delta[:, 0] + sin_y * delta[:, 1]
+    dy_r  = -sin_y * delta[:, 0] + cos_y * delta[:, 1]
+    dist  = torch.sqrt(dx_r ** 2 + dy_r ** 2).clamp(min=1e-4)
+    dir_x = dx_r / dist
+    dir_y = dy_r / dist
+    norm_dist = (dist / 10.0).clamp(max=1.0)
+    return torch.stack([dir_x, dir_y, norm_dist], dim=-1)   # (E, 3)
+
+
+def occupancy_grid_obs_cp5(env) -> torch.Tensor:
+    """CP5 asymmetric 40×40 occupancy grid, robot placed at row 10.
+
+    Uses scene["front_cam"] (MultiMeshRayCasterCamera).
+    Returns (num_envs, 1600) float32.
+    """
+    _cp5_init_waypoint_state(env)
+
+    camera = env.scene["front_cam"]
+    robot  = env.scene["robot"]
+
+    depth  = camera.data.output["distance_to_image_plane"]   # (E, H, W)
+    K_mats = camera.data.intrinsic_matrices                   # (E, 3, 3)
+    pos_w  = camera.data.pos_w
+    quat_w = camera.data.quat_w_ros
+
+    if torch.isnan(pos_w).any() or torch.isnan(quat_w).any():
+        return torch.zeros(env.num_envs, _CP5_N_CELLS ** 2,
+                           device=env.device, dtype=torch.float32)
+
+    from isaaclab.utils.math import unproject_depth, transform_points, quat_inv, quat_apply
+
+    points_cam   = unproject_depth(depth, K_mats)                         # (E, N, 3)
+    E, N, _      = points_cam.shape
+    points_world = transform_points(points_cam, pos_w, quat_w)            # (E, N, 3)
+
+    robot_pos  = robot.data.root_pos_w
+    robot_quat = robot.data.root_quat_w
+    pts_rel    = points_world - robot_pos.unsqueeze(1)
+    q_inv      = quat_inv(robot_quat).unsqueeze(1).expand(-1, N, -1)
+    pts_robot  = quat_apply(q_inv, pts_rel)                               # (E, N, 3)
+
+    x = pts_robot[..., 0]
+    y = pts_robot[..., 1]
+    z = pts_robot[..., 2]
+    valid = (z >= _CP5_MIN_H) & (z <= _CP5_MAX_H)
+
+    # Asymmetric placement: robot at (_CP5_ROBOT_ROW, _CP5_ROBOT_COL)
+    # Forward = +x → increases col; Left = +y → decreases row
+    cols = _CP5_ROBOT_COL + torch.round(x / _CP5_RESOLUTION_M).long()
+    rows = _CP5_ROBOT_ROW - torch.round(y / _CP5_RESOLUTION_M).long()
+
+    in_bounds = (
+        valid
+        & (rows >= 0) & (rows < _CP5_N_CELLS)
+        & (cols >= 0) & (cols < _CP5_N_CELLS)
+    )
+
+    linear_idx = rows * _CP5_N_CELLS + cols
+    linear_idx = linear_idx.clamp(0, _CP5_N_CELLS ** 2 - 1)
+    linear_idx[~in_bounds] = 0
+
+    grids = torch.zeros(E, _CP5_N_CELLS ** 2, device=env.device, dtype=torch.float32)
+    grids.scatter_(1, linear_idx, in_bounds.float())
+    return grids
+
+
+def future_waypoints_obs(env) -> torch.Tensor:
+    """Next 3 waypoints encoded in robot frame.
+
+    Returns (num_envs, 9): [dir_x, dir_y, norm_dist] × 3 waypoints.
+    Provides implicit lookahead — policy sees upcoming turns before reaching
+    the current waypoint (pure pursuit principle).
+    """
+    _cp5_init_waypoint_state(env)
+
+    robot     = env.scene["robot"]
+    robot_pos = robot.data.root_pos_w[:, :2]                   # (E, 2)
+    robot_yaw = quat_to_yaw_batch(robot.data.root_quat_w)      # (E,)
+
+    # Advance waypoint index when within threshold
+    W = len(env._cp5_waypoints)
+    curr_wp  = env._cp5_waypoints[env._cp5_wp_idx.clamp(max=W - 1)]   # (E, 2)
+    dist_now = torch.norm(curr_wp - robot_pos, dim=-1)                 # (E,)
+    advance  = (dist_now < _CP5_WAYPOINT_ADVANCE_DIST) & (env._cp5_wp_idx < W - 1)
+    env._cp5_wp_idx[advance] += 1
+
+    # Encode 3 future waypoints
+    obs_parts = []
+    for offset in range(_CP5_WP_LOOKAHEAD):
+        idx = (env._cp5_wp_idx + offset).clamp(max=W - 1)   # (E,)
+        wp  = env._cp5_waypoints[idx]                         # (E, 2)
+        obs_parts.append(_wp_in_robot_frame(robot_pos, robot_yaw, wp))
+
+    return torch.cat(obs_parts, dim=-1)   # (E, 9)
+
+
+def robot_velocity_obs(env) -> torch.Tensor:
+    """Robot base velocity in body frame: [vx, vy, yaw_rate]. Shape (E, 3)."""
+    robot  = env.scene["robot"]
+    lin_vel = robot.data.root_lin_vel_b[:, :2]   # (E, 2)  — body-frame xy
+    yaw_rate = robot.data.root_ang_vel_b[:, 2:3] # (E, 1)  — body-frame z (yaw)
+    return torch.cat([lin_vel, yaw_rate], dim=-1) # (E, 3)
