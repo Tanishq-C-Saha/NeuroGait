@@ -1,31 +1,51 @@
 """
 NeuroGait Navigation — Go2-specific environment configurations.
 
-No longer inherits from the frozen locomotion package. Instead, inherits
-from NavigationBaseEnvCfg (owned by the navigation task) via
-NeuroGaitNavigationGo2BaseEnvCfg which bakes in all Go2 robot + terrain
-+ sensor tuning.
-
 Inheritance chain:
-    ManagerBasedRLEnvCfg                         (Isaac Lab)
-        └── NavigationBaseEnvCfg                 (navigation_base_env_cfg.py)
-                └── NeuroGaitNavigationGo2BaseEnvCfg   (this file)
-                        └── NeuroGaitNavigationCP1EnvCfg   (this file, adds camera)
-                                └── NeuroGaitNavigationCP1EnvCfg_PLAY
+    ManagerBasedRLEnvCfg                                  (Isaac Lab)
+        └── NavigationBaseEnvCfg                          (navigation_base_env_cfg.py)
+                └── NeuroGaitNavigationGo2BaseEnvCfg      (this file)
+                        ├── NeuroGaitNavigationCP1EnvCfg  (CP3/CP4: rule-based, CameraCfg)
+                        │       └── NeuroGaitNavigationCP1EnvCfg_PLAY
+                        └── NeuroGaitNavigationCP5EnvCfg  (CP5: trained policy, RayCaster)
+                                └── NeuroGaitNavigationCP5EnvCfg_PLAY
 """
 
+import os
+
 import isaaclab.sim as sim_utils
+from isaaclab.envs import mdp as env_mdp
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
-from isaaclab.sensors import CameraCfg
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.sensors import CameraCfg, MultiMeshRayCasterCameraCfg
+from isaaclab.sensors.ray_caster import patterns
 from isaaclab.utils import configclass
 
 from neurogait.tasks.manager_based.navigation.navigation_base_env_cfg import (
     NavigationBaseEnvCfg,
 )
-from neurogait.tasks.manager_based.navigation.mdp import occupancy_grid_obs
+from neurogait.tasks.manager_based.navigation import mdp as nav_mdp
+from neurogait.tasks.manager_based.navigation.mdp import occupancy_grid_obs  # CP1
 
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG  # isort: skip
+
+# ── CP5: Frozen locomotion policy (TorchScript, exported by rsl_rl play.py) ──
+_LOCO_PT = os.path.join(
+    os.path.dirname(__file__),
+    "..", "..", "..", "..", "..", "..", "..", "..",  # → project root
+    "logs", "rsl_rl", "unitree_go2_rough",
+    "2026-06-13_19-33-23", "exported", "policy.pt",
+)
+_LOCO_PT = os.path.normpath(_LOCO_PT)
+
+# LOW_LEVEL_ENV_CFG: must use the rough variant to match 235-dim trained model
+# (see concept/cp5_concepts/research_notes.md — Research C)
+from neurogait.tasks.manager_based.locomotion.velocity.config.go2.rough_env_cfg import (  # noqa: E402
+    UnitreeGo2RoughEnvCfg,
+)
+LOW_LEVEL_ENV_CFG = UnitreeGo2RoughEnvCfg()
 
 
 # ── Go2 rough-terrain base ────────────────────────────────────────────────────
@@ -147,6 +167,152 @@ class NeuroGaitNavigationCP1EnvCfg_PLAY(NeuroGaitNavigationCP1EnvCfg):
         # The base config sets 20 s which causes mid-run respawns; 120 s
         # is generous enough for any planned path we generate.
         self.episode_length_s = 120.0
+
+        if getattr(self.scene.terrain, "terrain_generator", None) is not None:
+            self.scene.terrain.terrain_generator.num_rows   = 5
+            self.scene.terrain.terrain_generator.num_cols   = 5
+            self.scene.terrain.terrain_generator.curriculum = False
+
+        self.observations.policy.enable_corruption = False
+        self.events.base_external_force_torque     = None
+        self.events.push_robot                     = None
+
+
+# ── CP5: Trained navigation policy ────────────────────────────────────────────
+#
+# Key design decisions (see concept/cp5_concepts/ for full rationale):
+#   - Actions:  PreTrainedPolicyActionCfg wraps frozen locomotion TorchScript
+#   - Camera:   MultiMeshRayCasterCameraCfg (Warp GPU, not RTX CameraCfg)
+#   - Obs:      1615 dims — grid(1600) + waypoints(9) + vel(3) + gravity(3)
+#   - Timing:   decimation=40 → nav step = 0.2 s (5 Hz); loco runs at 50 Hz
+#   - Rewards:  7 terms from SEA-Nav, Li et al. 2025, X-Nav 2025
+#   - heading_command=True: action[2] = heading angle NOT yaw rate
+
+
+@configclass
+class CP5RewardsCfg:
+    """7 research-backed navigation reward terms for CP5."""
+
+    velocity_toward_goal = RewTerm(
+        func=nav_mdp.cp5_reward_velocity_toward_goal,
+        weight=10.0,
+    )
+    goal_proximity = RewTerm(
+        func=nav_mdp.cp5_reward_goal_proximity,
+        weight=3.0,
+    )
+    goal_reached = RewTerm(
+        func=nav_mdp.cp5_reward_goal_reached,
+        weight=20.0,
+    )
+    collision = RewTerm(
+        func=nav_mdp.cp5_penalty_collision_velocity_scaled,
+        weight=-5.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*"),
+        },
+    )
+    stuck = RewTerm(
+        func=nav_mdp.cp5_penalty_stuck,
+        weight=-3.0,
+    )
+    heading = RewTerm(
+        func=nav_mdp.cp5_reward_heading,
+        weight=0.5,
+    )
+    smoothness = RewTerm(
+        func=nav_mdp.cp5_penalty_smoothness,
+        weight=-0.01,
+    )
+
+
+@configclass
+class NeuroGaitNavigationCP5EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
+    """CP5: Trained navigation policy with PreTrainedPolicyAction + RayCaster camera.
+
+    Inherits the scene (obstacles, terrain, robot, sensors) from the Go2 base,
+    then replaces actions, observations.policy, rewards, and timing.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # ── 1. GPS-level timing: nav at 5 Hz, loco at 50 Hz ─────────────────
+        # low_level_decimation=4 → locomotion step = 4 × 0.005 = 0.02 s = 50 Hz
+        # navigation decimation = 40 → nav step    = 40 × 0.005 = 0.20 s = 5 Hz
+        self.sim.dt             = 0.005
+        self.decimation         = 40
+        self.sim.render_interval = self.decimation   # CRITICAL: must equal decimation
+        self.episode_length_s   = 30.0
+
+        # ── 2. Replace actions with PreTrainedPolicyActionCfg ─────────────────
+        self.actions.joint_pos = None                              # disable loco joint action
+        self.actions.pre_trained_policy_action = (
+            nav_mdp.PreTrainedPolicyActionCfg(
+                asset_name="robot",
+                policy_path=_LOCO_PT,
+                low_level_decimation=4,
+                low_level_actions=LOW_LEVEL_ENV_CFG.actions.joint_pos,
+                low_level_observations=LOW_LEVEL_ENV_CFG.observations.policy,
+            )
+        )
+
+        # ── 3. MultiMeshRayCasterCamera (GPU-efficient, replaces CameraCfg) ────
+        # scene["front_cam"] is what occupancy_grid_obs_cp5 reads
+        self.scene.front_cam = MultiMeshRayCasterCameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            mesh_prim_paths=["/World/ground", "{ENV_REGEX_NS}/obstacle_.*"],
+            update_period=0.2,
+            offset=MultiMeshRayCasterCameraCfg.OffsetCfg(
+                pos=(0.3, 0.0, 0.1),
+                rot=(0.4305, -0.5610, 0.5610, -0.4305),
+                convention="ros",
+            ),
+            data_types=["distance_to_image_plane"],
+            pattern_cfg=patterns.PinholeCameraPatternCfg(
+                focal_length=1.88,
+                width=80,
+                height=60,
+            ),
+        )
+
+        # ── 4. Replace observations.policy with CP5 navigation obs (1615 dims) ─
+        # ORDER IS CRITICAL: grid [0:1600] FIRST so CNN splits at index 1600.
+        @configclass
+        class CP5PolicyCfg(ObsGroup):
+            # Grid must be first — CNN splits obs at index 1600
+            occupancy_grid    = ObsTerm(func=nav_mdp.occupancy_grid_obs_cp5)   # 1600
+            future_waypoints  = ObsTerm(func=nav_mdp.future_waypoints_obs)     # 9
+            robot_velocity    = ObsTerm(func=nav_mdp.robot_velocity_obs)       # 3
+            projected_gravity = ObsTerm(func=env_mdp.projected_gravity)        # 3
+            def __post_init__(self):
+                self.enable_corruption = True
+                self.concatenate_terms = True
+
+        self.observations.policy = CP5PolicyCfg()
+
+        # ── 5. Replace rewards with 7 navigation terms (null locomotion ones) ──
+        self.rewards = CP5RewardsCfg()
+
+        # ── 6. Keep commands alive (harmless, base_velocity command exists) ───
+        self.commands.base_velocity.heading_command = True
+
+        # ── 7. Height scanner update period (required by locomotion internal obs)
+        self.scene.height_scanner.update_period = (
+            4 * self.sim.dt   # low_level_decimation × sim.dt = 0.02 s
+        )
+
+
+@configclass
+class NeuroGaitNavigationCP5EnvCfg_PLAY(NeuroGaitNavigationCP5EnvCfg):
+    """Single-env CP5 play config for evaluation."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.scene.num_envs     = 1
+        self.scene.env_spacing  = 2.5
+        self.episode_length_s   = 120.0   # generous for long paths
 
         if getattr(self.scene.terrain, "terrain_generator", None) is not None:
             self.scene.terrain.terrain_generator.num_rows   = 5
