@@ -42,35 +42,45 @@ def main():
     env = gym.make("NeuroGait-Navigation-CP5-v0", cfg=env_cfg)
     env.reset()
 
-    reward_accum = {}
-    for _ in range(args_cli.steps):
+    # Access reward manager directly — Isaac Lab only populates info["log"]
+    # on episode resets, not every step.  _step_reward is filled every step:
+    #   _step_reward[:, i] = func_output * weight  (already weighted)
+    rm           = env.unwrapped.reward_manager
+    term_names   = rm._term_names
+    reward_accum = {name: 0.0 for name in term_names}
+
+    for step in range(args_cli.steps):
         if not simulation_app.is_running():
             break
         actions = torch.rand(args_cli.num_envs, 3, device=env_cfg.sim.device) * 2 - 1
         actions[:, 2] *= math.pi   # scale heading to [-π, π]
-        _, _, _, _, info = env.step(actions)
+        env.step(actions)
 
-        for key, val in info.get("episode", {}).items():
-            if key.startswith("reward/") or key.startswith("rew/"):
-                name = key.split("/", 1)[-1]
-                reward_accum[name] = reward_accum.get(name, 0.0) + float(val.mean())
+        for i, name in enumerate(term_names):
+            reward_accum[name] += float(rm._step_reward[:, i].mean())
+
+        # Print robot sanity every 20 steps
+        if step % 20 == 0:
+            pos = env.unwrapped.scene["robot"].data.root_pos_w[0, :2].cpu()
+            print(f"  step {step:3d}  pos=({pos[0]:.2f}, {pos[1]:.2f})")
 
     print("\n" + "=" * 60)
-    print(f"CP5 Reward Scale Check  ({args_cli.num_envs} envs × {args_cli.steps} random-action steps)")
+    print(f"CP5 Reward Scale Check  ({args_cli.num_envs} envs × {args_cli.steps} steps)")
     print("=" * 60)
-    print(f"{'Term':<35} {'Mean/step':>10}")
+    print(f"  {'Term':<33} {'Mean/step':>10}  {'Total':>10}")
     print("-" * 60)
-    total = 0.0
-    for name in sorted(reward_accum):
-        mean_val = reward_accum[name] / args_cli.steps
-        print(f"  {name:<33} {mean_val:>10.4f}")
-        total += mean_val
+    grand_total = 0.0
+    for name in term_names:
+        mean_val  = reward_accum[name] / args_cli.steps
+        total_val = reward_accum[name]
+        print(f"  {name:<33} {mean_val:>10.4f}  {total_val:>10.4f}")
+        grand_total += mean_val
     print("-" * 60)
-    print(f"  {'TOTAL':<33} {total:>10.4f}")
+    print(f"  {'TOTAL':<33} {grand_total:>10.4f}")
     print("=" * 60)
     print("\nAll weighted terms should be within 10× of each other.")
-    print("If smoothness > 10× collision → reduce smoothness weight.")
-    print("If velocity_toward_goal ≈ 0  → check obs order / camera.\n")
+    print("If smoothness > 10× collision  → reduce smoothness weight.")
+    print("If velocity_toward_goal ≈ 0    → check obs order / camera.\n")
 
     env.close()
 
