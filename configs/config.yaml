@@ -1,0 +1,21 @@
+# d:/CAPSTONE/Navigation/configs/config.yaml
+defaults:
+  - _self_
+  - agent: ppo
+  - env: neurogait_nav_rubble
+  - robot: go2
+  - communication: gat
+  - logger: default
+
+run_name: "neurogait_run_${now:%Y%m%d_%H%M%S}"
+seed: 42
+device: "cuda:0"
+mode: "train" # [train, eval]
+checkpoint_path: null
+
+hydra:
+  run:
+    dir: outputs/${run_name}
+  sweep:
+    dir: multirun/${run_name}
+    subdir: ${hydra.job.num}
