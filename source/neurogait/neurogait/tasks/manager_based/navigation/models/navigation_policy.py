@@ -68,7 +68,8 @@ class NavigationPolicy(GaussianMixin, Model):
         initial_log_std: float = -1.0,
         **kwargs,
     ):
-        Model.__init__(self, observation_space, action_space, device)
+        Model.__init__(self, observation_space=observation_space,
+                       action_space=action_space, device=device)
         GaussianMixin.__init__(
             self,
             clip_actions=clip_actions,
@@ -129,7 +130,8 @@ class NavigationValue(DeterministicMixin, Model):
     """Critic: same CNN+MLP encoder → scalar value."""
 
     def __init__(self, observation_space, action_space, device, clip_actions: bool = False, **kwargs):
-        Model.__init__(self, observation_space, action_space, device)
+        Model.__init__(self, observation_space=observation_space,
+                       action_space=action_space, device=device)
         DeterministicMixin.__init__(self, clip_actions=clip_actions)
 
         self.grid_cnn, cnn_flat = _build_cnn()
