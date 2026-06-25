@@ -39,9 +39,6 @@ from datetime import datetime
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
-from skrl.agents.torch.ppo import PPO, PPO_DEFAULT_CONFIG
-from skrl.memories.torch import RandomMemory
-from skrl.trainers.torch import SequentialTrainer
 from skrl.utils.runner.torch import Runner
 
 import neurogait.tasks  # noqa: F401
