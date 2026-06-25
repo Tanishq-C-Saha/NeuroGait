@@ -101,7 +101,7 @@ class NavigationPolicy(GaussianMixin, Model):
         )
 
     def compute(self, inputs: dict, role: str = ""):
-        obs = inputs["states"]
+        obs = inputs["observations"]
 
         # CNN branch — spatial grid
         grid_flat = obs[:, :GRID_OBS_SIZE]
@@ -153,7 +153,7 @@ class NavigationValue(DeterministicMixin, Model):
         )
 
     def compute(self, inputs: dict, role: str = ""):
-        obs = inputs["states"]
+        obs = inputs["observations"]
 
         grid_flat = obs[:, :GRID_OBS_SIZE]
         grid_2d   = grid_flat.view(-1, 1, GRID_H, GRID_W)
