@@ -31,7 +31,7 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.navigation_env_cfg:NeuroGaitNavigationCP5EnvCfg",
-        "skrl_cfg_entry_point": f"{agents.__name__}.skrl_nav_ppo_cfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_nav_ppo_cfg.yaml",
     },
 )
 
@@ -41,6 +41,6 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.navigation_env_cfg:NeuroGaitNavigationCP5EnvCfg_PLAY",
-        "skrl_cfg_entry_point": f"{agents.__name__}.skrl_nav_ppo_cfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_nav_ppo_cfg.yaml",
     },
 )
