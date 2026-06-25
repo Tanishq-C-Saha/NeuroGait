@@ -102,7 +102,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
         "grad_norm_clip":                float(a.get("grad_norm_clip", 1.0)),
         "ratio_clip":                    float(a.get("ratio_clip", 0.2)),
         "value_clip":                    float(a.get("value_clip", 0.2)),
-        "clip_predicted_values":         bool(a.get("clip_predicted_values", True)),
         "entropy_loss_scale":            float(a.get("entropy_loss_scale", 0.01)),
         "value_loss_scale":              float(a.get("value_loss_scale", 1.0)),
         "kl_threshold":                  0.0,
