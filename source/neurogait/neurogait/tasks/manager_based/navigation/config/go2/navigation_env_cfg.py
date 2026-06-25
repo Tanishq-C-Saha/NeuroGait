@@ -215,11 +215,11 @@ class CP5RewardsCfg:
     )
     stuck = RewTerm(
         func=nav_mdp.cp5_penalty_stuck,
-        weight=-3.0,
+        weight=-0.3,
     )
     heading = RewTerm(
         func=nav_mdp.cp5_reward_heading,
-        weight=0.5,
+        weight=0.1,
     )
     smoothness = RewTerm(
         func=nav_mdp.cp5_penalty_smoothness,
