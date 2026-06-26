@@ -1,27 +1,27 @@
 """CP5 — Evaluate a trained navigation policy.
 
+Loads the policy weights directly from a skrl checkpoint without using Runner.
+
 Run:
     ~/isaac-sim/kit/python/bin/python3 scripts/cp5/play.py \
       --task NeuroGait-Navigation-CP5-Play-v0 \
-      --num_envs 1 \
-      --checkpoint logs/skrl/neurogait_cp5_navigation/<run>/checkpoints/agent_<N>.pt
+      --checkpoint logs/skrl/neurogait_cp5_navigation/<run>/checkpoints/best_agent.pt
 
-Debug output every step:
+Output every 10 steps:
     Step   10 | CMD vx=+0.50 vy=+0.00 hdg=+0.78 | vel vx=+0.48 vy=+0.01 | POS (2.3, 0.5)
 """
 
 import argparse
 import sys
-import os
-import math
 
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="CP5 navigation evaluation")
 parser.add_argument("--task",       type=str, default="NeuroGait-Navigation-CP5-Play-v0")
 parser.add_argument("--num_envs",   type=int, default=1)
-parser.add_argument("--checkpoint", type=str, required=True, help="Path to skrl agent checkpoint")
-parser.add_argument("--max_steps",  type=int, default=1000)
+parser.add_argument("--checkpoint", type=str, required=True,
+                    help="Path to skrl checkpoint (.pt file in checkpoints/)")
+parser.add_argument("--max_steps",  type=int, default=2000)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 sys.argv = [sys.argv[0]] + hydra_args
@@ -34,10 +34,9 @@ import gymnasium as gym
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
-from skrl.utils.runner.torch import Runner
 
 import neurogait.tasks  # noqa: F401
-from neurogait.tasks.manager_based.navigation.models import NavigationPolicy, NavigationValue
+from neurogait.tasks.manager_based.navigation.models import NavigationPolicy
 
 
 @hydra_task_config(args_cli.task, "skrl_cfg_entry_point")
@@ -49,36 +48,50 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
     env = gym.make(args_cli.task, cfg=env_cfg)
     env = SkrlVecEnvWrapper(env, ml_framework="torch")
 
-    device   = env_cfg.sim.device
-    policy   = NavigationPolicy(env.observation_space, env.action_space, device)
-    value    = NavigationValue(env.observation_space, env.action_space, device)
-    models   = {"policy": policy, "value": value}
-    agent_cfg["models"] = models
-    agent_cfg["trainer"]["close_environment_at_exit"] = False
+    device = env_cfg.sim.device
 
-    runner = Runner(env, agent_cfg)
+    # ── Load policy ──────────────────────────────────────────────────────────
+    policy = NavigationPolicy(
+        observation_space=env.observation_space,
+        action_space=env.action_space,
+        device=device,
+    )
+
     print(f"[CP5-play] Loading checkpoint: {args_cli.checkpoint}")
-    runner.agent.load(args_cli.checkpoint)
+    checkpoint = torch.load(args_cli.checkpoint, map_location=device)
 
+    # skrl saves state dicts under per-model keys; print them once so it's
+    # clear which key to use if the structure changes between skrl versions.
+    print(f"[CP5-play] Checkpoint keys: {list(checkpoint.keys())}")
+
+    # skrl PPO checkpoints store the policy state dict under "policy"
+    if "policy" in checkpoint:
+        policy.load_state_dict(checkpoint["policy"])
+    else:
+        # Fallback: checkpoint IS the state dict (some skrl versions save directly)
+        policy.load_state_dict(checkpoint)
+
+    policy.eval()
+
+    # ── Inference loop ───────────────────────────────────────────────────────
     obs, _ = env.reset()
-    nav_env = env.env.unwrapped   # unwrap to access robot data
+    nav_env = env.env.unwrapped
 
     for step in range(args_cli.max_steps):
         if not simulation_app.is_running():
             break
 
         with torch.no_grad():
-            actions, _ = runner.agent.policy.act({"states": obs}, role="policy")
+            # skrl passes obs under "observations" key (not "states")
+            actions, _, _ = policy.act({"observations": obs}, role="policy")
 
-        obs, rewards, terminated, truncated, info = env.step(actions)
-
-        # Extract debug info
-        robot    = nav_env.scene["robot"]
-        pos      = robot.data.root_pos_w[0].cpu()
-        lin_vel  = robot.data.root_lin_vel_b[0].cpu()
-        cmd      = actions[0].cpu()
+        obs, rewards, terminated, truncated, _ = env.step(actions)
 
         if step % 10 == 0:
+            robot   = nav_env.scene["robot"]
+            pos     = robot.data.root_pos_w[0].cpu()
+            lin_vel = robot.data.root_lin_vel_b[0].cpu()
+            cmd     = actions[0].cpu()
             print(
                 f"Step {step:4d} | "
                 f"CMD vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} hdg={cmd[2]:+.2f} | "
