@@ -84,7 +84,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
 
         with torch.no_grad():
             # skrl passes obs under "observations" key (not "states")
-            actions, _, _ = policy.act({"observations": obs}, role="policy")
+            result = policy.act({"observations": obs}, role="policy")
+            actions = result[0]
 
         obs, rewards, terminated, truncated, _ = env.step(actions)
 
