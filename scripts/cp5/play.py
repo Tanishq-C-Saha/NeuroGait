@@ -126,12 +126,11 @@ def _save_trajectory_plot(grid, origin, resolution, astar_path, trajectory,
         ax.set_ylabel("Y (m)")
         ax.set_aspect("equal")
 
-        # Zoom to the relevant area instead of showing the full 40 m grid
-        pad = 5.0
-        all_x = [p[0] for p in trajectory] + [start_xy[0], goal_xy[0]]
-        all_y = [p[1] for p in trajectory] + [start_xy[1], goal_xy[1]]
-        ax.set_xlim(min(all_x) - pad, max(all_x) + pad)
-        ax.set_ylim(min(all_y) - pad, max(all_y) + pad)
+        # Fixed 15 x 15 m window centred on the midpoint of start and goal
+        cx = (start_xy[0] + goal_xy[0]) / 2.0
+        cy = (start_xy[1] + goal_xy[1]) / 2.0
+        ax.set_xlim(cx - 7.5, cx + 7.5)
+        ax.set_ylim(cy - 7.5, cy + 7.5)
         ax.legend(loc="upper left", fontsize=9)
         ax.grid(True, color="#cccccc", linewidth=0.4, linestyle="--")
 
