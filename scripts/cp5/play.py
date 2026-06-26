@@ -71,6 +71,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
         # Fallback: checkpoint IS the state dict (some skrl versions save directly)
         policy.load_state_dict(checkpoint)
 
+    policy.to(device)
     policy.eval()
 
     # ── Inference loop ───────────────────────────────────────────────────────
