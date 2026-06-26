@@ -127,7 +127,7 @@ def _save_trajectory_plot(grid, origin, resolution, astar_path, trajectory,
         ax.set_aspect("equal")
 
         # Zoom to the relevant area instead of showing the full 40 m grid
-        pad = 2.0
+        pad = 5.0
         all_x = [p[0] for p in trajectory] + [start_xy[0], goal_xy[0]]
         all_y = [p[1] for p in trajectory] + [start_xy[1], goal_xy[1]]
         ax.set_xlim(min(all_x) - pad, max(all_x) + pad)
