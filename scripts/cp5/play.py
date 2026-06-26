@@ -175,52 +175,58 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
     trajectory    = []
     goal_reached  = False
 
-    for step in range(args_cli.max_steps):
-        if not simulation_app.is_running():
-            break
+    try:
+        for step in range(args_cli.max_steps):
+            if not simulation_app.is_running():
+                break
 
-        with torch.no_grad():
-            result  = policy.act({"observations": obs}, role="policy")
-            actions = result[0]
+            with torch.no_grad():
+                result  = policy.act({"observations": obs}, role="policy")
+                actions = result[0]
 
-        obs, rewards, terminated, truncated, _ = env.step(actions)
+            obs, rewards, terminated, truncated, _ = env.step(actions)
 
-        robot = nav_env.scene["robot"]
-        pos   = robot.data.root_pos_w[0, :2].cpu().numpy()
-        trajectory.append((float(pos[0]), float(pos[1])))
+            robot = nav_env.scene["robot"]
+            pos   = robot.data.root_pos_w[0, :2].cpu().numpy()
+            trajectory.append((float(pos[0]), float(pos[1])))
 
-        # Check goal
-        dist_to_goal = math.sqrt((pos[0] - goal_xy[0]) ** 2 + (pos[1] - goal_xy[1]) ** 2)
-        if dist_to_goal < 0.5:
-            print(f"[CP5-play] Goal REACHED at step {step} (dist={dist_to_goal:.2f} m)")
-            goal_reached = True
+            # Check goal
+            dist_to_goal = math.sqrt((pos[0] - goal_xy[0]) ** 2 + (pos[1] - goal_xy[1]) ** 2)
+            if dist_to_goal < 0.5:
+                print(f"[CP5-play] Goal REACHED at step {step} (dist={dist_to_goal:.2f} m)")
+                goal_reached = True
 
-        if step % 10 == 0:
-            lin_vel = robot.data.root_lin_vel_b[0].cpu()
-            cmd     = actions[0].cpu()
-            print(
-                f"Step {step:4d} | "
-                f"CMD vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} hdg={cmd[2]:+.2f} | "
-                f"vel vx={lin_vel[0]:+.2f} vy={lin_vel[1]:+.2f} | "
-                f"POS ({pos[0]:.1f}, {pos[1]:.1f}) | dist_goal={dist_to_goal:.1f} m"
+            if step % 10 == 0:
+                lin_vel = robot.data.root_lin_vel_b[0].cpu()
+                cmd     = actions[0].cpu()
+                print(
+                    f"Step {step:4d} | "
+                    f"CMD vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} hdg={cmd[2]:+.2f} | "
+                    f"vel vx={lin_vel[0]:+.2f} vy={lin_vel[1]:+.2f} | "
+                    f"POS ({pos[0]:.1f}, {pos[1]:.1f}) | dist_goal={dist_to_goal:.1f} m"
+                )
+
+            if terminated.any() or truncated.any():
+                print(f"[CP5-play] Episode ended at step {step}")
+                obs, _ = env.reset()
+
+    finally:
+        # Save map regardless of how we exit — normal finish, window close,
+        # Ctrl-C, or any exception raised in the loop.
+        if trajectory:
+            _save_trajectory_plot(
+                grid=grid,
+                origin=origin,
+                resolution=0.2,
+                astar_path=astar_path,
+                trajectory=trajectory,
+                start_xy=start_xy,
+                goal_xy=goal_xy,
+                reached=goal_reached,
+                save_path=os.path.join(_MAPS_DIR, "cp5_trajectory.png"),
             )
-
-        if terminated.any() or truncated.any():
-            print(f"[CP5-play] Episode ended at step {step}")
-            obs, _ = env.reset()
-
-    # ── Always save comparison plot (regardless of goal reached / timeout) ────
-    _save_trajectory_plot(
-        grid=grid,
-        origin=origin,
-        resolution=0.2,
-        astar_path=astar_path,
-        trajectory=trajectory,
-        start_xy=start_xy,
-        goal_xy=goal_xy,
-        reached=goal_reached,
-        save_path=os.path.join(_MAPS_DIR, "cp5_trajectory.png"),
-    )
+        else:
+            print("[CP5-play] No trajectory recorded — map not saved")
 
     env.close()
 
