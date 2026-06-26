@@ -58,67 +58,84 @@ def _spawn_marker(prim_path: str, xyz: tuple, color_rgb: tuple) -> None:
     cfg.func(prim_path, cfg, translation=xyz)
 
 
+def _save_trajectory_csv(trajectory, save_path):
+    """Write raw (x, y) points to a CSV — fast and survives matplotlib failures."""
+    try:
+        with open(save_path, "w") as f:
+            f.write("x,y\n")
+            for x, y in trajectory:
+                f.write(f"{x:.4f},{y:.4f}\n")
+        print(f"[CP5-play] Trajectory CSV saved → {save_path}")
+    except Exception as e:
+        print(f"[CP5-play] WARNING: CSV save failed: {e}")
+
+
 def _save_trajectory_plot(grid, origin, resolution, astar_path, trajectory,
                           start_xy, goal_xy, reached, save_path):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    print(f"[CP5-play] Saving trajectory map ({len(trajectory)} points) → {save_path}")
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
 
-    rows, cols = grid.shape
-    extent = [
-        origin[0], origin[0] + cols * resolution,
-        origin[1], origin[1] + rows * resolution,
-    ]
+        rows, cols = grid.shape
+        extent = [
+            origin[0], origin[0] + cols * resolution,
+            origin[1], origin[1] + rows * resolution,
+        ]
 
-    fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(10, 8))
 
-    ax.imshow(grid, origin="lower", cmap="gray_r", extent=extent, vmin=0, vmax=1)
+        ax.imshow(grid, origin="lower", cmap="gray_r", extent=extent, vmin=0, vmax=1)
 
-    if astar_path and len(astar_path) >= 2:
-        ax.plot([p[0] for p in astar_path], [p[1] for p in astar_path],
-                color="#1565C0", linewidth=2.0, label="A* planned path",
-                solid_capstyle="round")
+        if astar_path and len(astar_path) >= 2:
+            ax.plot([p[0] for p in astar_path], [p[1] for p in astar_path],
+                    color="#1565C0", linewidth=2.0, label="A* planned path",
+                    solid_capstyle="round")
 
-    if trajectory and len(trajectory) >= 2:
-        ax.plot([p[0] for p in trajectory], [p[1] for p in trajectory],
-                color="#D32F2F", linewidth=1.5, label="RL actual trajectory",
-                solid_capstyle="round", alpha=0.8)
+        if trajectory and len(trajectory) >= 2:
+            ax.plot([p[0] for p in trajectory], [p[1] for p in trajectory],
+                    color="#D32F2F", linewidth=1.5, label="RL actual trajectory",
+                    solid_capstyle="round", alpha=0.8)
 
-    ax.scatter(*start_xy, s=180, color="#00C853", edgecolors="black",
-               linewidths=1.2, zorder=5, label="Start")
-    ax.scatter(*goal_xy,  s=180, color="#FF1744", edgecolors="black",
-               linewidths=1.2, zorder=5, label="Goal")
+        ax.scatter(*start_xy, s=180, color="#00C853", edgecolors="black",
+                   linewidths=1.2, zorder=5, label="Start")
+        ax.scatter(*goal_xy,  s=180, color="#FF1744", edgecolors="black",
+                   linewidths=1.2, zorder=5, label="Goal")
 
-    if trajectory:
-        final = trajectory[-1]
-        ax.scatter(*final, s=120, color="#FF9100", marker="D",
-                   edgecolors="black", linewidths=1.2, zorder=5,
-                   label=f"Final pos ({final[0]:.1f}, {final[1]:.1f})")
+        if trajectory:
+            final = trajectory[-1]
+            ax.scatter(*final, s=120, color="#FF9100", marker="D",
+                       edgecolors="black", linewidths=1.2, zorder=5,
+                       label=f"Final pos ({final[0]:.1f}, {final[1]:.1f})")
 
-    n_steps = len(trajectory)
-    dist_covered = sum(
-        ((trajectory[i + 1][0] - trajectory[i][0]) ** 2
-         + (trajectory[i + 1][1] - trajectory[i][1]) ** 2) ** 0.5
-        for i in range(n_steps - 1)
-    ) if n_steps > 1 else 0.0
-    status = "REACHED" if reached else "NOT REACHED"
-    ax.set_title(
-        f"NeuroGait CP5 — A* Plan vs RL Trajectory\n"
-        f"Goal: {status} | Steps: {n_steps} | Distance covered: {dist_covered:.1f} m",
-        fontsize=10,
-    )
+        n_steps = len(trajectory)
+        dist_covered = sum(
+            ((trajectory[i + 1][0] - trajectory[i][0]) ** 2
+             + (trajectory[i + 1][1] - trajectory[i][1]) ** 2) ** 0.5
+            for i in range(n_steps - 1)
+        ) if n_steps > 1 else 0.0
+        status = "REACHED" if reached else "NOT REACHED"
+        ax.set_title(
+            f"NeuroGait CP5 — A* Plan vs RL Trajectory\n"
+            f"Goal: {status} | Steps: {n_steps} | Distance covered: {dist_covered:.1f} m",
+            fontsize=10,
+        )
 
-    ax.set_xlabel("X (m)")
-    ax.set_ylabel("Y (m)")
-    ax.set_aspect("equal")
-    ax.legend(loc="upper left", fontsize=9)
-    ax.grid(True, color="#cccccc", linewidth=0.4, linestyle="--")
+        ax.set_xlabel("X (m)")
+        ax.set_ylabel("Y (m)")
+        ax.set_aspect("equal")
+        ax.legend(loc="upper left", fontsize=9)
+        ax.grid(True, color="#cccccc", linewidth=0.4, linestyle="--")
 
-    plt.tight_layout()
-    os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
-    plt.savefig(save_path, dpi=180, bbox_inches="tight")
-    plt.close()
-    print(f"[CP5-play] Trajectory map saved → {save_path}")
+        plt.tight_layout()
+        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
+        plt.savefig(save_path, dpi=180, bbox_inches="tight")
+        plt.close()
+        print(f"[CP5-play] Trajectory map saved → {save_path}")
+
+    except Exception as e:
+        print(f"[CP5-play] WARNING: plot save failed ({type(e).__name__}: {e})")
 
 
 @hydra_task_config(args_cli.task, "skrl_cfg_entry_point")
@@ -172,8 +189,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
 
     # ── Inference loop ────────────────────────────────────────────────────────
     import math
-    trajectory    = []
-    goal_reached  = False
+    trajectory   = []
+    goal_reached = False
+    _save_path   = os.path.join(_MAPS_DIR, "cp5_trajectory.png")
+    os.makedirs(_MAPS_DIR, exist_ok=True)
+
+    # Periodic save every N steps so the file exists on disk even if Isaac Sim
+    # hard-exits via os._exit() (which bypasses Python finally blocks entirely).
+    _SAVE_INTERVAL = 50
 
     try:
         for step in range(args_cli.max_steps):
@@ -190,7 +213,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
             pos   = robot.data.root_pos_w[0, :2].cpu().numpy()
             trajectory.append((float(pos[0]), float(pos[1])))
 
-            # Check goal
             dist_to_goal = math.sqrt((pos[0] - goal_xy[0]) ** 2 + (pos[1] - goal_xy[1]) ** 2)
             if dist_to_goal < 0.5:
                 print(f"[CP5-play] Goal REACHED at step {step} (dist={dist_to_goal:.2f} m)")
@@ -206,24 +228,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
                     f"POS ({pos[0]:.1f}, {pos[1]:.1f}) | dist_goal={dist_to_goal:.1f} m"
                 )
 
+            # Periodic map flush — survives os._exit() on window close
+            if step > 0 and step % _SAVE_INTERVAL == 0:
+                _save_trajectory_plot(
+                    grid=grid, origin=origin, resolution=0.2,
+                    astar_path=astar_path, trajectory=trajectory,
+                    start_xy=start_xy, goal_xy=goal_xy,
+                    reached=goal_reached, save_path=_save_path,
+                )
+
             if terminated.any() or truncated.any():
                 print(f"[CP5-play] Episode ended at step {step}")
                 obs, _ = env.reset()
 
     finally:
-        # Save map regardless of how we exit — normal finish, window close,
-        # Ctrl-C, or any exception raised in the loop.
+        # Final save — runs on normal finish, KeyboardInterrupt, or exception.
+        # CSV is written first (fast) so data is safe even if matplotlib fails.
         if trajectory:
+            csv_path = _save_path.replace(".png", ".csv")
+            _save_trajectory_csv(trajectory, csv_path)
             _save_trajectory_plot(
-                grid=grid,
-                origin=origin,
-                resolution=0.2,
-                astar_path=astar_path,
-                trajectory=trajectory,
-                start_xy=start_xy,
-                goal_xy=goal_xy,
-                reached=goal_reached,
-                save_path=os.path.join(_MAPS_DIR, "cp5_trajectory.png"),
+                grid=grid, origin=origin, resolution=0.2,
+                astar_path=astar_path, trajectory=trajectory,
+                start_xy=start_xy, goal_xy=goal_xy,
+                reached=goal_reached, save_path=_save_path,
             )
         else:
             print("[CP5-play] No trajectory recorded — map not saved")
