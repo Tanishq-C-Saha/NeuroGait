@@ -26,7 +26,6 @@ import math
 import random
 
 import numpy as np
-import torch
 
 # ── Go2 body dimensions (actual spec, not estimates) ─────────────────────────
 GO2_BODY_WIDTH  = 0.31   # metres (relevant for lateral clearance)
@@ -186,15 +185,20 @@ def _place_obstacles(
 def apply_scene_to_env(
     env,
     obstacles: list[dict],
-    device: str | torch.device,
+    device,
 ) -> None:
     """Write generated obstacle positions to the simulator for ALL parallel envs.
 
     Obstacles are specified in LOCAL env coordinates (same for every env).
     This function broadcasts to world coords by adding each env's origin.
     Unused scene objects (when len(obstacles) < num_scene_objects) are moved
-    to y=100 (effectively hidden).
+    to y=1000 (effectively hidden).
+
+    `device` can be a string or torch.device — torch is imported here lazily
+    so that the rest of the module works in standalone (no Isaac Sim) contexts.
     """
+    import torch  # lazy: only needed inside the simulator
+
     env_origins_xy = env.scene.env_origins[:, :2]   # (E, 2)
     E = env.num_envs
     all_ids = torch.arange(E, device=device)

@@ -19,8 +19,15 @@ from __future__ import annotations
 import sys
 import os
 
-# Allow import without installing the package
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "source", "neurogait"))
+# Import scene modules directly to avoid dragging in Isaac Lab / pxr.
+# The scene/ package has no Isaac Lab deps (numpy + scipy only).
+_NAV_DIR = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "../../source/neurogait/neurogait/tasks/manager_based/navigation",
+    )
+)
+sys.path.insert(0, _NAV_DIR)
 
 import matplotlib
 matplotlib.use("Agg")
@@ -28,11 +35,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
-from neurogait.tasks.manager_based.navigation.scene import (
-    NavigationCurriculum,
-    generate_scene,
-    MIN_CORRIDOR,
-)
+from scene.scene_generator import generate_scene, MIN_CORRIDOR
+from scene.curriculum import NavigationCurriculum
 
 
 _PROGRESS_LEVELS = [0.0, 0.20, 0.40, 0.60, 0.80, 1.0]
