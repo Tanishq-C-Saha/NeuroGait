@@ -15,7 +15,7 @@
 | Reward core | Scalar velocity-toward-goal | Multiplicative (Miki 2022) |
 | Path following | None | exp(−min_dist²/1.0) to waypoints |
 | Collision avoidance | Binary contact penalty | Graduated clearance via depth cam |
-| Goal termination | None (episode runs out) | DoneTerm at 0.5 m from goal |
+| Goal termination | None (episode runs out) | DoneTerm at 0.1 m from goal |
 | Stuck detection | All envs | Near-goal exempt (< 1.5 m) |
 | Action smoothness | 1st-order jerk | 2nd-order: jerk + jerk-delta |
 
@@ -24,9 +24,9 @@
 ## Architecture
 
 CP6 inherits the full CP5 stack unchanged:
-- **Policy network**: `NavigationPolicy` (CNN on 100×100 occupancy grid + MLP on 15-dim scalars)
+- **Policy network**: `NavigationPolicy` (CNN on 40×40 occupancy grid + MLP on 15-dim scalars)
 - **Locomotion backbone**: Frozen pre-trained PPO weights (Go2 locomotion, `low_level_decimation=4`)
-- **Observation**: 1615-dim (100×100 grid + 15 scalars) at 5 Hz navigation rate
+- **Observation**: 1615-dim (40×40 grid + 15 scalars) at 5 Hz navigation rate
 - **Action**: `[vx, vy, heading]` command to the locomotion policy
 
 The pre-trained locomotion policy is NOT fine-tuned during CP6.
@@ -40,7 +40,7 @@ The pre-trained locomotion policy is NOT fine-tuned during CP6.
 | `navigation_core` | +10.0 | r_forward × r_lateral × r_heading | Miki et al. 2022 |
 | `path_following` | +5.0 | exp(−min_dist²) to nearest waypoint | NavRL++ |
 | `goal_proximity` | +0.1 | Shaping toward final waypoint | Li et al. 2025 |
-| `goal_reached` | +50.0 | Sparse bonus at 0.5 m radius | X-Nav 2025 |
+| `goal_reached` | +50.0 | Sparse bonus at 0.1 m radius | X-Nav 2025 |
 | `slow_near_goal` | +3.0 | Reward deceleration < 1.5 m from goal | Custom |
 | `graduated_clearance` | −1.0 | Depth-based danger/caution zones | DWA-3D 2024 |
 | `collision` | −1.5 | Contact velocity-scaled penalty | SEA-Nav 2026 |
