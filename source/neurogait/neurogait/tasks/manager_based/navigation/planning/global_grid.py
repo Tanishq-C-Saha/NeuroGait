@@ -49,7 +49,6 @@ def build_global_grid(env, grid_resolution=0.2, grid_size=200):
         origin        : (float, float) world (x, y) of grid cell (0, 0)
         obstacle_info : list of dicts {name, x, y, shape, sx, sy, inflate_r}
     """
-    print("[CP4] Building global occupancy grid...")
 
     # Centre the grid on the robot's actual world position so the grid covers
     # the robot's environment even when env_spacing places it far from (0, 0).
@@ -96,10 +95,6 @@ def build_global_grid(env, grid_resolution=0.2, grid_size=200):
         })
         n_rasterized += 1
 
-    occ_cells = int(grid.sum())
-    print(f"[CP4] Grid built: {grid_size}x{grid_size} cells @ {grid_resolution}m/cell, "
-          f"{n_rasterized} obstacles rasterized, {occ_cells} occupied cells "
-          f"(C-space inflation per obstacle = {_INFLATION_M:.2f} m)")
     return grid, origin, obstacle_info
 
 

@@ -242,7 +242,7 @@ def _cp5_init_waypoint_state(env) -> None:
         n = max(int(dist), 2)
         waypoints = [(start_xy[0] + dx * i / n, start_xy[1] + dy * i / n)
                      for i in range(1, n + 1)]
-        print("[CP5] Warning: A* failed, using straight-line fallback path")
+        pass  # silenced — straight-line fallback is normal during curriculum warmup
 
     # Convert world waypoints (env 0) → local (relative to env-0 origin)
     local_wp_np = np.array(waypoints, dtype=np.float32) - env0_origin_np  # (W, 2)
@@ -259,9 +259,7 @@ def _cp5_init_waypoint_state(env) -> None:
     # Position history for stuck detection: (E, 20, 2)
     env._cp5_pos_history = torch.zeros(env.num_envs, 20, 2, dtype=torch.float32, device=env.device)
     env._cp5_pos_hist_idx = 0
-    W = local_wp_np.shape[0]
-    print(f"[CP5] Waypoint state initialised: {W} waypoints, "
-          f"local goal={_CP5_GOAL_XY}, {env.num_envs} envs")
+    pass
 
 
 def _cp5_reset_waypoint_state(env, env_ids) -> None:
