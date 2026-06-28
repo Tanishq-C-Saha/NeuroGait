@@ -281,26 +281,32 @@ def cp5_penalty_smoothness(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 
 def cp6_reward_navigation_core(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """Multiplicative reward: r_forward × r_lateral × r_heading.
+    """Hybrid reward: (r_forward × r_lateral) + 0.3 × r_heading.
 
-    Each component is a Gaussian centred on the desired behaviour.
-    If ANY component is near zero the entire reward collapses to zero —
-    the robot must face forward, suppress lateral drift, AND move toward
-    the waypoint simultaneously to earn any reward.
+    Multiplicative part (r_forward × r_lateral) enforces anti-crab-walking:
+    the robot must move forward AND suppress lateral drift simultaneously.
+
+    Heading is additive so the robot always receives a non-zero gradient
+    for facing the waypoint, even when movement is poor early in training.
+    Fully multiplicative (old) caused r_heading ≈ 0 at episode start
+    → total ≈ 0 → no learning signal → policy learned to stand still.
+
+    Range: [0, 1] multiplicative part + [0, 0.3] heading bonus → [0, 1.3].
+    With weight=10 → max ~13 per step.
 
     Sources: Miki et al. 2022 (Science Robotics) orthogonal velocity
-    concept; multiplicative structure from biomechanics nav 2025.
+    concept; hybrid structure motivated by PPO dead-zone analysis.
     """
     from neurogait.tasks.manager_based.navigation.mdp.observations import quat_to_yaw_batch
 
-    robot              = env.scene["robot"]
+    robot                   = env.scene["robot"]
     curr_wp, dist, robot_xy = _cp5_current_wp_and_dist(env)
-    robot_yaw          = quat_to_yaw_batch(robot.data.root_quat_w)   # (E,)
+    robot_yaw               = quat_to_yaw_batch(robot.data.root_quat_w)   # (E,)
 
     dx = curr_wp[:, 0] - robot_xy[:, 0]
     dy = curr_wp[:, 1] - robot_xy[:, 1]
-    target_yaw    = torch.atan2(dy, dx)
-    heading_err   = torch.atan2(
+    target_yaw  = torch.atan2(dy, dx)
+    heading_err = torch.atan2(
         torch.sin(target_yaw - robot_yaw),
         torch.cos(target_yaw - robot_yaw),
     )   # wrapped to [-π, π]
@@ -320,7 +326,8 @@ def cp6_reward_navigation_core(env: ManagerBasedRLEnv) -> torch.Tensor:
     r_heading = torch.exp(-(heading_err ** 2) / 0.25)
 
     env._cp5_prev_dist[:] = dist
-    return r_forward * r_lateral * r_heading   # all three must be satisfied
+    # Multiplicative anti-crab-walk core + additive heading bonus
+    return (r_forward * r_lateral) + 0.3 * r_heading
 
 
 def cp6_reward_path_following(env: ManagerBasedRLEnv) -> torch.Tensor:
