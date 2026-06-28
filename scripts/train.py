@@ -1,19 +1,24 @@
-"""CP5 — Train the navigation policy with skrl PPO + CNN+MLP models.
+"""Train any registered NeuroGait navigation task with skrl PPO + CNN+MLP models.
 
 Uses PPO + SequentialTrainer directly (bypasses skrl Runner) so custom
 NavigationPolicy / NavigationValue model instances can be passed in.
 
 Run:
-    ~/isaac-sim/kit/python/bin/python3 scripts/cp5/train.py \
+    ~/isaac-sim/kit/python/bin/python3 scripts/train.py \
       --task NeuroGait-Navigation-CP5-v0 \
       --num_envs 512 \
       --headless
 
+    ~/isaac-sim/kit/python/bin/python3 scripts/train.py \
+      --task NeuroGait-Navigation-CP6-v0 \
+      --num_envs 512 \
+      --headless
+
 Training checklist (run in this order):
-  1. python scripts/cp5/export_locomotion.py          # verify TorchScript shape
-  2. python scripts/cp5/test_reward_scales.py --num_envs 256 --headless
-  3. python scripts/cp5/train.py --num_envs 512 --headless --max_iterations 50  (smoke test)
-  4. python scripts/cp5/train.py --num_envs 512 --headless                      (full run)
+  1. python scripts/cp5/export_locomotion.py                         # verify TorchScript
+  2. python scripts/test_reward_scales.py --task <TASK> --headless   # check balance
+  3. python scripts/train.py --task <TASK> --num_envs 512 --headless --max_iterations 50
+  4. python scripts/train.py --task <TASK> --num_envs 512 --headless
 """
 
 import argparse
@@ -22,7 +27,7 @@ import os
 
 from isaaclab.app import AppLauncher
 
-parser = argparse.ArgumentParser(description="CP5 navigation training with skrl PPO")
+parser = argparse.ArgumentParser(description="NeuroGait navigation training with skrl PPO")
 parser.add_argument("--task",           type=str, default="NeuroGait-Navigation-CP5-v0")
 parser.add_argument("--num_envs",       type=int, default=512)
 parser.add_argument("--max_iterations", type=int, default=None,
@@ -77,11 +82,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
     rollouts = int(a.get("rollouts", 24))
     memory = RandomMemory(memory_size=rollouts, num_envs=env.num_envs, device=device)
 
-    # ── Experiment logging ───────────────────────────────────────────────────
+    # ── Experiment logging ────────────────────────────────────────────────────
+    # Derive log dir from task ID so each task gets its own subdirectory.
+    # e.g. "NeuroGait-Navigation-CP6-v0" → "logs/skrl/neurogait_navigation_cp6_v0/<ts>"
+    task_name = args_cli.task.lower().replace("-", "_")
     log_dir = os.path.abspath(os.path.join(
-        "logs", "skrl", "neurogait_cp5_navigation",
+        "logs", "skrl", task_name,
         datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
     ))
+    os.makedirs(log_dir, exist_ok=True)
 
     # ── PPO config ───────────────────────────────────────────────────────────
     # YAML keys "state_preprocessor"/"learning_rate_scheduler" are strings
@@ -124,7 +133,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
     )
 
     if args_cli.checkpoint:
-        print(f"[CP5-train] Resuming from: {args_cli.checkpoint}")
+        print(f"[train] Resuming from: {args_cli.checkpoint}")
         agent.load(args_cli.checkpoint)
 
     # ── Trainer ──────────────────────────────────────────────────────────────
@@ -139,8 +148,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: dict):
         cfg={"timesteps": timesteps, "close_environment_at_exit": False},
     )
 
-    print(f"[CP5-train] Logging to: {log_dir}")
-    print(f"[CP5-train] Training for {timesteps} timesteps ({timesteps // rollouts} iterations)")
+    print(f"[train] Task:     {args_cli.task}")
+    print(f"[train] Log dir:  {log_dir}")
+    print(f"[train] Training: {timesteps} timesteps ({timesteps // rollouts} iterations)")
     trainer.train()
 
     env.close()

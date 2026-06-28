@@ -172,7 +172,11 @@ def cp6_randomize_obstacles_and_replan(
     env._cp5_prev_action[env_ids] = 0.0
     env._cp5_pos_history[env_ids] = 0.0
 
-    print(
-        f"[CP6] Obstacles randomized (dx={dx:+.2f} m, dy={dy:+.2f} m) | "
-        f"{len(waypoints)} waypoints | {len(env_ids)}/{env.num_envs} envs reset"
-    )
+    # Only log on the very first replan — with 512 envs resetting frequently
+    # this print would otherwise flood the terminal during training.
+    if not hasattr(env, "_cp6_replan_logged"):
+        print(
+            f"[CP6] First replan: dx={dx:+.2f} m dy={dy:+.2f} m | "
+            f"{len(waypoints)} waypoints | {len(env_ids)}/{env.num_envs} envs reset"
+        )
+        env._cp6_replan_logged = True
