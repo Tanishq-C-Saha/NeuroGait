@@ -51,8 +51,11 @@ def build_global_grid(env, grid_resolution=0.2, grid_size=200):
     """
     print("[CP4] Building global occupancy grid...")
 
+    # Centre the grid on the robot's actual world position so the grid covers
+    # the robot's environment even when env_spacing places it far from (0, 0).
+    robot_pos_w = env.scene["robot"].data.root_pos_w[0, :2].cpu().numpy()
     half = grid_size * grid_resolution / 2.0
-    origin = (-half, -half)
+    origin = (float(robot_pos_w[0]) - half, float(robot_pos_w[1]) - half)
 
     grid = np.zeros((grid_size, grid_size), dtype=np.uint8)
     obstacle_info = []

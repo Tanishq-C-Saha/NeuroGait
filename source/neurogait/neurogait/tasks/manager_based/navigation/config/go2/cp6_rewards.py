@@ -28,7 +28,7 @@ class CP6RewardsCfg:
     )
     path_following = RewTerm(
         func=nav_mdp.cp6_reward_path_following,
-        weight=5.0,
+        weight=1.0,   # 5.0 → 1.0: was 5× too dominant vs navigation_core at runtime
     )
     goal_proximity = RewTerm(
         func=nav_mdp.cp5_reward_goal_proximity,
@@ -44,7 +44,7 @@ class CP6RewardsCfg:
     )
     graduated_clearance = RewTerm(
         func=nav_mdp.cp6_penalty_graduated_clearance,
-        weight=-1.0,
+        weight=-0.05,  # -1.0 → -0.05: was 1147× too dominant; depth fires every step
     )
     collision = RewTerm(
         func=nav_mdp.cp5_penalty_collision_velocity_scaled,

@@ -66,11 +66,14 @@ def cp6_randomize_obstacles_and_replan(
         float(env0_origin_xy[1]) + goal_local_xy[1],
     )
 
-    # Grid parameters — must match build_global_grid defaults
+    # Grid parameters — must match build_global_grid defaults.
+    # Centre on env-0 origin (same as robot spawn) so the grid covers the
+    # actual environment when env_spacing places it far from world (0, 0).
     grid_resolution  = 0.2
     grid_size        = 200
     half             = grid_size * grid_resolution / 2.0
-    grid_origin      = (-half, -half)
+    grid_origin      = (float(env0_origin_xy[0]) - half,
+                        float(env0_origin_xy[1]) - half)
 
     lo_x, hi_x = position_range["x"]
     lo_y, hi_y = position_range["y"]
