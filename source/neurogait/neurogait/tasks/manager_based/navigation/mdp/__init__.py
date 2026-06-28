@@ -41,6 +41,18 @@ from .rewards import (
     cp5_penalty_smoothness,
 )
 
+# CP6: upgraded reward terms + obstacle randomization event
+from .rewards import (
+    cp6_reward_navigation_core,
+    cp6_reward_path_following,
+    cp6_penalty_graduated_clearance,
+    cp6_reward_slow_near_goal,
+    cp6_penalty_stuck_v2,
+    cp6_penalty_smoothness_2nd_order,
+)
+from .terminations import cp6_goal_reached
+from .events import cp6_randomize_obstacles_and_replan
+
 # navigation mdp funcs for PreTrainedPolicyAction
 from isaaclab_tasks.manager_based.navigation.mdp import (
     PreTrainedPolicyAction,

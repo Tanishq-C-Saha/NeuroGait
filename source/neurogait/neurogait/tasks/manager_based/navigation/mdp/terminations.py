@@ -17,6 +17,27 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
+def cp6_goal_reached(
+    env: ManagerBasedRLEnv,
+    threshold: float = 0.5,
+) -> torch.Tensor:
+    """Terminate episode when robot reaches the final waypoint.
+
+    Returns True for envs whose robot centre is within `threshold` metres
+    of the last waypoint in env._cp5_waypoints.
+
+    threshold=0.5 m gives a generous acceptance radius that accounts for
+    the 0.3 m body half-width plus 0.2 m navigation tolerance.
+    """
+    from neurogait.tasks.manager_based.navigation.mdp.observations import _cp5_init_waypoint_state
+    _cp5_init_waypoint_state(env)
+
+    robot_xy   = env.scene["robot"].data.root_pos_w[:, :2]   # (E, 2)
+    final_goal = env._cp5_waypoints[:, -1, :]                 # (E, 2)
+    dist       = torch.norm(robot_xy - final_goal, dim=-1)    # (E,)
+    return dist < threshold
+
+
 def terrain_out_of_bounds(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),

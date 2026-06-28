@@ -272,3 +272,193 @@ def cp5_penalty_smoothness(env: ManagerBasedRLEnv) -> torch.Tensor:
     diff        = (curr_action - env._cp5_prev_action).norm(dim=-1)
     env._cp5_prev_action[:] = curr_action.detach()
     return diff   # positive magnitude; weight=-0.01 makes this a penalty
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CP6 navigation reward terms
+# Literature: Miki et al. 2022 (Science Robotics), DWA-3D 2024, Go2 task 2025
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def cp6_reward_navigation_core(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Multiplicative reward: r_forward × r_lateral × r_heading.
+
+    Each component is a Gaussian centred on the desired behaviour.
+    If ANY component is near zero the entire reward collapses to zero —
+    the robot must face forward, suppress lateral drift, AND move toward
+    the waypoint simultaneously to earn any reward.
+
+    Sources: Miki et al. 2022 (Science Robotics) orthogonal velocity
+    concept; multiplicative structure from biomechanics nav 2025.
+    """
+    from neurogait.tasks.manager_based.navigation.mdp.observations import quat_to_yaw_batch
+
+    robot              = env.scene["robot"]
+    curr_wp, dist, robot_xy = _cp5_current_wp_and_dist(env)
+    robot_yaw          = quat_to_yaw_batch(robot.data.root_quat_w)   # (E,)
+
+    dx = curr_wp[:, 0] - robot_xy[:, 0]
+    dy = curr_wp[:, 1] - robot_xy[:, 1]
+    target_yaw    = torch.atan2(dy, dx)
+    heading_err   = torch.atan2(
+        torch.sin(target_yaw - robot_yaw),
+        torch.cos(target_yaw - robot_yaw),
+    )   # wrapped to [-π, π]
+
+    vx = robot.data.root_lin_vel_b[:, 0]   # forward body velocity
+    vy = robot.data.root_lin_vel_b[:, 1]   # lateral body velocity
+
+    target_speed = 0.8   # desired approach speed (m/s)
+
+    # Forward: Gaussian around target projected speed
+    r_forward = torch.exp(
+        -((vx - torch.cos(heading_err) * target_speed) ** 2) / 0.25
+    )
+    # Lateral: penalise sideways drift (σ² = 1/3)
+    r_lateral = torch.exp(-3.0 * vy ** 2)
+    # Heading: penalise facing away from waypoint (σ² = 0.25)
+    r_heading = torch.exp(-(heading_err ** 2) / 0.25)
+
+    env._cp5_prev_dist[:] = dist
+    return r_forward * r_lateral * r_heading   # all three must be satisfied
+
+
+def cp6_reward_path_following(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Gaussian proximity to the A* planned path (σ² = 1.0 m²).
+
+    The A* path routes through gaps in obstacles; rewarding proximity to
+    the path teaches the robot to use those gaps rather than taking long
+    detours around the entire obstacle field.
+
+    Concept: pure-pursuit path adherence, adapted for RL.
+    """
+    from neurogait.tasks.manager_based.navigation.mdp.observations import _cp5_init_waypoint_state
+    _cp5_init_waypoint_state(env)
+
+    robot_xy  = env.scene["robot"].data.root_pos_w[:, :2]   # (E, 2)
+    waypoints = env._cp5_waypoints                           # (E, W, 2)
+
+    diff      = robot_xy.unsqueeze(1) - waypoints            # (E, W, 2)
+    dists     = diff.norm(dim=-1)                            # (E, W)
+    min_dist  = dists.min(dim=-1).values                     # (E,)
+
+    return torch.exp(-min_dist ** 2 / 1.0)
+
+
+def cp6_penalty_graduated_clearance(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Three-zone obstacle proximity penalty from depth camera.
+
+    d > 1.0 m  →  0          (free space)
+    0.3 < d ≤ 1.0 m  →  gentle linear ramp  (caution zone)
+    d ≤ 0.3 m  →  velocity-scaled penalty   (danger zone)
+
+    Uses scene["front_cam"] (MultiMeshRayCasterCamera) minimum depth as a
+    proxy for clearance to the nearest forward obstacle.
+
+    Source: DWA-3D (2024) — graduated zones allow gap squeezing while
+    preventing collisions.
+    """
+    camera = env.scene["front_cam"]
+    depth  = camera.data.output["distance_to_image_plane"]   # (E, H, W)
+
+    depth_clean                        = depth.clone()
+    depth_clean[torch.isnan(depth_clean)] = 10.0   # rays that miss = far
+    depth_clean[depth_clean <= 0]      = 10.0
+    min_depth = depth_clean.reshape(env.num_envs, -1).min(dim=-1).values  # (E,)
+
+    speed = env.scene["robot"].data.root_lin_vel_b[:, :2].norm(dim=-1)   # (E,)
+
+    # Danger zone (d ≤ 0.3 m) — velocity-scaled
+    danger  = (min_depth <= 0.3).float() * 5.0 * speed.clamp(min=0.1)
+
+    # Caution zone (0.3 < d ≤ 1.0 m) — linear fade from 0.5 → 0
+    caution = (
+        ((min_depth > 0.3) & (min_depth <= 1.0)).float()
+        * 0.5
+        * (1.0 - min_depth / 1.0).clamp(min=0.0)
+    )
+
+    return danger + caution   # positive magnitude; weight=-1.0 makes this a penalty
+
+
+def cp6_reward_slow_near_goal(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Reward low speed when within 1.5 m of the final goal.
+
+    Teaches the robot to decelerate on approach.  Combined with
+    cp6_goal_reached (termination) the learned behaviour is:
+      fast approach → slow near goal → stop → terminal reward → done.
+
+    Source: X-Nav (2025), deceleration curriculum.
+    """
+    from neurogait.tasks.manager_based.navigation.mdp.observations import _cp5_init_waypoint_state
+    _cp5_init_waypoint_state(env)
+
+    robot_xy   = env.scene["robot"].data.root_pos_w[:, :2]
+    final_goal = env._cp5_waypoints[:, -1, :]                      # (E, 2)
+    dist       = torch.norm(robot_xy - final_goal, dim=-1)          # (E,)
+    speed      = env.scene["robot"].data.root_lin_vel_b[:, :2].norm(dim=-1)
+
+    near_goal = (dist < 1.5).float()
+    return near_goal * (1.0 - speed.clamp(max=1.0))
+
+
+def cp6_penalty_stuck_v2(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Stuck penalty with near-goal exemption.
+
+    Same sliding-window logic as cp5_penalty_stuck but suppressed when
+    the robot is within 1.5 m of the goal (where low speed is desired).
+
+    Source: SEA-Nav (Huang et al., 2026) with near-goal patch.
+    """
+    from neurogait.tasks.manager_based.navigation.mdp.observations import _cp5_init_waypoint_state
+    _cp5_init_waypoint_state(env)
+
+    robot    = env.scene["robot"]
+    robot_xy = robot.data.root_pos_w[:, :2].detach()
+
+    final_goal   = env._cp5_waypoints[:, -1, :]
+    dist_to_goal = torch.norm(robot_xy - final_goal, dim=-1)
+    near_goal    = dist_to_goal < 1.5
+
+    idx                              = env._cp5_pos_hist_idx % 20
+    env._cp5_pos_history[:, idx, :] = robot_xy
+    env._cp5_pos_hist_idx           += 1
+
+    pos_spread = (env._cp5_pos_history - robot_xy.unsqueeze(1)).norm(dim=-1)
+    max_disp   = pos_spread.max(dim=-1).values
+
+    nav_actions       = env.action_manager.action
+    commanding_fwd    = (
+        (nav_actions[:, 0] > 0.1)
+        if nav_actions.shape[-1] >= 1
+        else torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    )
+
+    stuck = (max_disp < 0.1) & commanding_fwd & ~near_goal
+    return stuck.float()   # positive magnitude; weight=-0.3 makes this a penalty
+
+
+def cp6_penalty_smoothness_2nd_order(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """First + second order action smoothness penalty.
+
+    First-order catches large step changes; second-order catches oscillations
+    that look smooth step-to-step but alternate direction every step.
+
+    Source: Go2 task (2025), "First Order Model-Based RL".
+    """
+    curr = env.action_manager.action   # (E, 3)
+
+    if not hasattr(env, "_cp6_prev_action_1"):
+        env._cp6_prev_action_1 = curr.clone()
+        env._cp6_prev_action_2 = curr.clone()
+
+    d1 = curr             - env._cp6_prev_action_1
+    d2 = env._cp6_prev_action_1 - env._cp6_prev_action_2
+
+    first_order  = d1.norm(dim=-1)
+    second_order = (d1 - d2).norm(dim=-1)
+
+    env._cp6_prev_action_2 = env._cp6_prev_action_1.clone()
+    env._cp6_prev_action_1 = curr.detach().clone()
+
+    return 0.01 * first_order + 0.005 * second_order  # positive; weight=-1.0
