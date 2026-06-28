@@ -19,6 +19,7 @@ import os
 
 import isaaclab.sim as sim_utils
 from isaaclab.envs import mdp as env_mdp
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -35,6 +36,7 @@ from neurogait.tasks.manager_based.navigation.mdp import occupancy_grid_obs  # C
 
 from .cp5_rewards import CP5RewardsCfg
 from .cp6_rewards import CP6RewardsCfg
+from neurogait.tasks.manager_based.navigation.managers import CurriculumCfg as _BaseCurriculumCfg
 
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG  # isort: skip
 
@@ -362,28 +364,46 @@ class NeuroGaitNavigationCP6EnvCfg_PLAY(NeuroGaitNavigationCP6EnvCfg):
 
 
 @configclass
+class CP65CurriculumCfg(_BaseCurriculumCfg):
+    """5-axis difficulty curriculum for CP6.5.
+
+    Isaac Lab's CurriculumManager calls obstacle_difficulty automatically
+    inside _reset_idx() — before the reset EventTerm fires — so
+    cp65_reset_with_generated_scene always reads fresh env._curr_* values.
+    """
+
+    obstacle_difficulty = CurrTerm(
+        func=nav_mdp.curriculum_obstacle_difficulty,
+        params={
+            "ramp_iterations": 2_000,   # training iterations to full difficulty
+            "gap_start": 2.0,  "gap_end": 0.51,
+            "obs_start": 3,    "obs_end": 12,
+            "pad_start": 3.0,  "pad_end": 1.5,
+            "angle_start": 0.3, "angle_end": 0.8,
+        },
+    )
+
+
+@configclass
 class NeuroGaitNavigationCP65EnvCfg(NeuroGaitNavigationCP6EnvCfg):
-    """CP6.5 — Path-first scene generation + 4-axis curriculum.
+    """CP6.5 — Obstacles-first scene generation + Isaac Lab curriculum.
 
-    Replaces A*-based obstacle randomization with procedural path generation:
-    1. Sample a random cubic-spline path from start to goal
-    2. Place obstacles OUTSIDE a protected corridor (guaranteed traversability)
-    3. Progressively narrow the corridor + add obstacles over training
-
-    This replaces cp6_randomize_obstacles_and_replan with
-    cp65_reset_with_generated_scene and removes the dependency on A*.
+    Uses CurriculumTermCfg to ramp difficulty automatically — no manual
+    step() calls, no off-by-one bugs.  Difficulty is read by the reset
+    event from env._curr_* attributes the curriculum term writes first.
     """
 
     def __post_init__(self):
         super().__post_init__()
 
+        # Wire in the built-in curriculum manager
+        self.curriculum = CP65CurriculumCfg()
+
         # Swap reset event: obstacles-first generation + random goals
+        # (no ramp_iterations param — curriculum is handled by CurriculumTerm above)
         self.events.randomize_obstacles = EventTerm(  # type: ignore[attr-defined]
             func=nav_mdp.cp65_reset_with_generated_scene,
             mode="reset",
-            params={
-                "ramp_iterations": 40_000,   # ≈ 2000 training iters at 512 envs
-            },
         )
 
 

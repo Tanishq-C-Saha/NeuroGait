@@ -186,31 +186,27 @@ def cp6_randomize_obstacles_and_replan(
 def cp65_reset_with_generated_scene(
     env: "ManagerBasedRLEnv",
     env_ids: torch.Tensor,
-    ramp_iterations: int = 40_000,
 ) -> None:
-    """EventTerm (mode="reset"): obstacles-first scene generation with curriculum.
+    """EventTerm (mode="reset"): obstacles-first scene generation.
 
-    Each reset batch:
-      1. Steps the curriculum counter (call once per reset batch)
-      2. Generates a random goal and places obstacles with connectivity guarantee
-      3. Runs A* on the final grid for the optimal path (same as deployment)
+    Reads difficulty from env._curr_* attributes written by the
+    CurriculumTerm (curriculum_obstacle_difficulty), which Isaac Lab
+    calls automatically before this reset event fires inside _reset_idx().
+
+    Each reset:
+      1. Reads current difficulty from env._curr_* (set by CurriculumTerm)
+      2. Generates a random goal + places obstacles with BFS connectivity check
+      3. Runs A* for the optimal path (same algorithm as deployment)
       4. Writes obstacle world positions to all envs in the sim
-      5. Stores waypoints as env._cp5_waypoints (E, W, 2) — all rewards use this
+      5. Stores waypoints as env._cp5_waypoints (E, W, 2)
       6. Resets waypoint tracking state for the resetting envs
 
-    Goal is random each episode: variable distance (5–10 m) and angle (±46°).
-    Last waypoint in env._cp5_waypoints is always the goal, so all goal-based
-    reward and termination functions work without modification.
-
-    Args:
-        ramp_iterations: curriculum steps before full difficulty.
-                         Default = 40_000 ≈ 2000 training iterations
-                         (20 reset-event calls per iteration at 512 envs).
+    Last waypoint == goal, so all CP5/CP6 reward and termination functions
+    work unchanged.
     """
     global _last_curriculum_log
 
     from neurogait.tasks.manager_based.navigation.scene import (
-        NavigationCurriculum,
         generate_scene,
         apply_scene_to_env,
     )
@@ -221,21 +217,22 @@ def cp65_reset_with_generated_scene(
     # Ensure base waypoint tensors exist before we overwrite them
     _cp5_init_waypoint_state(env)
 
-    # ── 1. Curriculum ─────────────────────────────────────────────────────────
-    if not hasattr(env, "_curriculum"):
-        env._curriculum = NavigationCurriculum(ramp_iterations=ramp_iterations)
-    env._curriculum.step()
-    difficulty = env._curriculum.get_difficulty()
+    # ── 1. Read difficulty params (written by CurriculumTerm before us) ───────
+    gap_width     = getattr(env, "_curr_gap_width",     2.0)
+    num_obstacles = getattr(env, "_curr_num_obstacles",  3)
+    arena_padding = getattr(env, "_curr_arena_padding",  3.0)
+    goal_dist     = getattr(env, "_curr_goal_dist",     (6.0, 7.0))
+    goal_angle    = getattr(env, "_curr_goal_angle",    (-0.3, 0.3))
 
     # ── 2. Generate scene (obstacles-first, random goal, local coords) ────────
     obstacles, waypoints, goal_local = generate_scene(
         start_xy         = (0.0, 0.0),
-        goal_xy          = None,                          # random each episode
-        num_obstacles    = difficulty["num_obstacles"],
-        min_gap_width    = difficulty["min_gap_width"],
-        arena_padding    = difficulty["arena_padding"],
-        goal_dist_range  = difficulty["goal_dist"],
-        goal_angle_range = difficulty["goal_angle"],
+        goal_xy          = None,
+        num_obstacles    = num_obstacles,
+        min_gap_width    = gap_width,
+        arena_padding    = arena_padding,
+        goal_dist_range  = goal_dist,
+        goal_angle_range = goal_angle,
     )
 
     # ── 3. Apply obstacles to sim (all envs, shared layout) ───────────────────
@@ -266,9 +263,16 @@ def cp65_reset_with_generated_scene(
     # ── Rate-limited logging (max 1 per 60 s) ─────────────────────────────────
     now = time.time()
     if now - _last_curriculum_log > 60.0:
+        from neurogait.tasks.manager_based.navigation.mdp.curriculums import _NAV_ROLLOUT_LENGTH
+        t = getattr(env, "_curr_gap_width", None)   # proxy: set means curriculum ran
+        t_pct = 0.0
+        if hasattr(env, "common_step_counter"):
+            ramp_steps = 2_000 * _NAV_ROLLOUT_LENGTH
+            t_pct = min(100.0, 100.0 * env.common_step_counter / max(1, ramp_steps))
         print(
-            f"[CP6.5] {env._curriculum.progress_str()} | "
+            f"[CP6.5] curriculum {t_pct:.0f}% | "
+            f"gap={gap_width:.2f}m obs={num_obstacles} pad={arena_padding:.1f}m | "
             f"goal=({goal_local[0]:.1f},{goal_local[1]:.1f}) | "
-            f"{W_new} waypoints | {len(obstacles)} obstacles"
+            f"{W_new} waypoints"
         )
         _last_curriculum_log = now

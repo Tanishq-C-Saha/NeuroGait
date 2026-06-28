@@ -8,4 +8,4 @@ from .scene_generator import (
     MIN_CORRIDOR,   # backwards-compat alias
     SAFETY_MARGIN,
 )
-from .curriculum import NavigationCurriculum
+from .curriculum import difficulty_at

@@ -50,6 +50,7 @@ from .rewards import (
     cp6_penalty_stuck_v2,
     cp6_penalty_smoothness_2nd_order,
 )
+from .curriculums import curriculum_obstacle_difficulty
 from .terminations import cp6_goal_reached
 from .events import cp6_randomize_obstacles_and_replan, cp65_reset_with_generated_scene
 

@@ -33,11 +33,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from scene.scene_generator import generate_scene, GO2_WIDTH, MIN_GAP
-from scene.curriculum import NavigationCurriculum
+from scene.curriculum import difficulty_at
 
 
-_PROGRESS_PCT  = [0, 20, 40, 60, 80, 100]   # curriculum percentage per panel
-_RAMP          = 100                          # ramp_iterations for viz (divisor = pct)
+_PROGRESS_PCT = [0, 20, 40, 60, 80, 100]   # curriculum percentage per panel
 
 
 def _draw_panel(
@@ -124,12 +123,10 @@ def main():
         fontsize=11, fontweight="bold",
     )
 
-    curriculum = NavigationCurriculum(ramp_iterations=_RAMP)
-    start_xy   = (0.0, 0.0)
+    start_xy = (0.0, 0.0)
 
     for ax, pct in zip(axes.flat, _PROGRESS_PCT):
-        curriculum.current_iteration = pct   # direct assignment for viz
-        diff = curriculum.get_difficulty()
+        diff = difficulty_at(pct / 100.0)
 
         obstacles, waypoints, goal_xy = generate_scene(
             start_xy         = start_xy,
