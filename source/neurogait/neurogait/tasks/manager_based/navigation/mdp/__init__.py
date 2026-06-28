@@ -51,7 +51,7 @@ from .rewards import (
     cp6_penalty_smoothness_2nd_order,
 )
 from .terminations import cp6_goal_reached
-from .events import cp6_randomize_obstacles_and_replan
+from .events import cp6_randomize_obstacles_and_replan, cp65_reset_with_generated_scene
 
 # navigation mdp funcs for PreTrainedPolicyAction
 from isaaclab_tasks.manager_based.navigation.mdp import (

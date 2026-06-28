@@ -66,3 +66,25 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_nav_ppo_cfg.yaml",
     },
 )
+
+# ── CP6.5: Path-first scene generation + 4-axis curriculum ───────────────────
+
+gym.register(
+    id="NeuroGait-Navigation-CP65-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.navigation_env_cfg:NeuroGaitNavigationCP65EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_nav_ppo_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="NeuroGait-Navigation-CP65-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.navigation_env_cfg:NeuroGaitNavigationCP65EnvCfg_PLAY",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_nav_ppo_cfg.yaml",
+    },
+)

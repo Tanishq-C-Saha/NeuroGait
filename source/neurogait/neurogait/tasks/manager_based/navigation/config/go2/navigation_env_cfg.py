@@ -9,8 +9,10 @@ Inheritance chain:
                         │       └── NeuroGaitNavigationCP1EnvCfg_PLAY
                         └── NeuroGaitNavigationCP5EnvCfg  (CP5: trained policy, RayCaster)
                                 ├── NeuroGaitNavigationCP5EnvCfg_PLAY
-                                └── NeuroGaitNavigationCP6EnvCfg  (CP6: randomized obstacles + upgraded rewards)
-                                        └── NeuroGaitNavigationCP6EnvCfg_PLAY
+                                └── NeuroGaitNavigationCP6EnvCfg  (CP6: randomized A* obstacles)
+                                        ├── NeuroGaitNavigationCP6EnvCfg_PLAY
+                                        └── NeuroGaitNavigationCP65EnvCfg (CP6.5: path-first + curriculum)
+                                                └── NeuroGaitNavigationCP65EnvCfg_PLAY
 """
 
 import os
@@ -262,7 +264,7 @@ class NeuroGaitNavigationCP5EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
         self.observations.policy = CP5PolicyCfg()
 
         # ── 5. Replace rewards with 7 navigation terms (null locomotion ones) ──
-        self.rewards = CP5RewardsCfg()
+        self.rewards = CP5RewardsCfg()  # type: ignore[assignment]
 
         # ── 6. Keep commands alive (harmless, base_velocity command exists) ───
         self.commands.base_velocity.heading_command = True
@@ -341,6 +343,54 @@ class NeuroGaitNavigationCP6EnvCfg(NeuroGaitNavigationCP5EnvCfg):
 @configclass
 class NeuroGaitNavigationCP6EnvCfg_PLAY(NeuroGaitNavigationCP6EnvCfg):
     """Single-env CP6 play config for evaluation and trajectory visualisation."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.scene.num_envs    = 1
+        self.scene.env_spacing = 10
+        self.episode_length_s  = 120.0
+
+        if getattr(self.scene.terrain, "terrain_generator", None) is not None:
+            self.scene.terrain.terrain_generator.num_rows   = 5
+            self.scene.terrain.terrain_generator.num_cols   = 5
+            self.scene.terrain.terrain_generator.curriculum = False
+
+        self.observations.policy.enable_corruption = False
+        self.events.base_external_force_torque     = None
+        self.events.push_robot                     = None
+
+
+@configclass
+class NeuroGaitNavigationCP65EnvCfg(NeuroGaitNavigationCP6EnvCfg):
+    """CP6.5 — Path-first scene generation + 4-axis curriculum.
+
+    Replaces A*-based obstacle randomization with procedural path generation:
+    1. Sample a random cubic-spline path from start to goal
+    2. Place obstacles OUTSIDE a protected corridor (guaranteed traversability)
+    3. Progressively narrow the corridor + add obstacles over training
+
+    This replaces cp6_randomize_obstacles_and_replan with
+    cp65_reset_with_generated_scene and removes the dependency on A*.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Swap reset event: path-first generation instead of A* replanning
+        self.events.randomize_obstacles = EventTerm(  # type: ignore[attr-defined]
+            func=nav_mdp.cp65_reset_with_generated_scene,
+            mode="reset",
+            params={
+                "goal_local_xy": (8.0, 0.0),
+                "ramp_steps": 24_576_000,   # 2000 iters × 24 rollouts × 512 envs
+            },
+        )
+
+
+@configclass
+class NeuroGaitNavigationCP65EnvCfg_PLAY(NeuroGaitNavigationCP65EnvCfg):
+    """Single-env CP6.5 play config for evaluation and trajectory visualisation."""
 
     def __post_init__(self):
         super().__post_init__()
