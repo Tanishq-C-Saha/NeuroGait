@@ -44,3 +44,25 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_nav_ppo_cfg.yaml",
     },
 )
+
+# ── CP6: Generalized navigation (randomised obstacles, upgraded rewards) ──────
+
+gym.register(
+    id="NeuroGait-Navigation-CP6-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.navigation_env_cfg:NeuroGaitNavigationCP6EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_nav_ppo_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="NeuroGait-Navigation-CP6-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.navigation_env_cfg:NeuroGaitNavigationCP6EnvCfg_PLAY",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_nav_ppo_cfg.yaml",
+    },
+)

@@ -8,16 +8,20 @@ Inheritance chain:
                         ├── NeuroGaitNavigationCP1EnvCfg  (CP3/CP4: rule-based, CameraCfg)
                         │       └── NeuroGaitNavigationCP1EnvCfg_PLAY
                         └── NeuroGaitNavigationCP5EnvCfg  (CP5: trained policy, RayCaster)
-                                └── NeuroGaitNavigationCP5EnvCfg_PLAY
+                                ├── NeuroGaitNavigationCP5EnvCfg_PLAY
+                                └── NeuroGaitNavigationCP6EnvCfg  (CP6: randomized obstacles + upgraded rewards)
+                                        └── NeuroGaitNavigationCP6EnvCfg_PLAY
 """
 
 import os
 
 import isaaclab.sim as sim_utils
 from isaaclab.envs import mdp as env_mdp
+from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import CameraCfg, MultiMeshRayCasterCameraCfg
 from isaaclab.sensors.ray_caster import patterns
@@ -179,6 +183,7 @@ class NeuroGaitNavigationCP1EnvCfg_PLAY(NeuroGaitNavigationCP1EnvCfg):
 
 
 # ── CP5: Trained navigation policy ────────────────────────────────────────────
+
 #
 # Key design decisions (see concept/cp5_concepts/ for full rationale):
 #   - Actions:  PreTrainedPolicyActionCfg wraps frozen locomotion TorchScript
@@ -313,8 +318,127 @@ class NeuroGaitNavigationCP5EnvCfg_PLAY(NeuroGaitNavigationCP5EnvCfg):
         super().__post_init__()
 
         self.scene.num_envs     = 1
-        self.scene.env_spacing  = 2.5
+        self.scene.env_spacing  = 10
         self.episode_length_s   = 120.0   # generous for long paths
+
+        if getattr(self.scene.terrain, "terrain_generator", None) is not None:
+            self.scene.terrain.terrain_generator.num_rows   = 5
+            self.scene.terrain.terrain_generator.num_cols   = 5
+            self.scene.terrain.terrain_generator.curriculum = False
+
+        self.observations.policy.enable_corruption = False
+        self.events.base_external_force_torque     = None
+        self.events.push_robot                     = None
+
+
+# ── CP6: Generalized navigation + upgraded rewards ────────────────────────────
+#
+# What changes from CP5 (see concept/cp6_concepts/ for full rationale):
+#   Rewards:  multiplicative core (Miki 2022), path-following, graduated
+#             clearance (DWA-3D 2024), goal termination, 2nd-order smoothness
+#   Events:   obstacles randomized ±1.5 m on every episode reset; A* replans
+#   Termination: episode ends when robot is within 0.5 m of goal
+#   Fixes:    crab-walking, long detours, no goal-stop from CP5
+
+
+@configclass
+class CP6RewardsCfg:
+    """CP6 reward function — 9 terms from published literature.
+
+    Sources:
+      multiplicative core  — Miki et al. 2022 (Science Robotics)
+      path following        — pure-pursuit concept + NavRL++
+      graduated clearance  — DWA-3D (2024)
+      goal proximity       — Li et al. (2025)
+      goal reached         — X-Nav (2025)
+      collision            — SEA-Nav (Huang et al., 2026)
+      stuck                — SEA-Nav (2026) with near-goal patch
+      2nd-order smoothness — Go2 task (2025)
+    """
+
+    navigation_core = RewTerm(
+        func=nav_mdp.cp6_reward_navigation_core,
+        weight=10.0,
+    )
+    path_following = RewTerm(
+        func=nav_mdp.cp6_reward_path_following,
+        weight=5.0,
+    )
+    goal_proximity = RewTerm(
+        func=nav_mdp.cp5_reward_goal_proximity,
+        weight=0.1,
+    )
+    goal_reached = RewTerm(
+        func=nav_mdp.cp5_reward_goal_reached,
+        weight=50.0,
+    )
+    slow_near_goal = RewTerm(
+        func=nav_mdp.cp6_reward_slow_near_goal,
+        weight=3.0,
+    )
+    graduated_clearance = RewTerm(
+        func=nav_mdp.cp6_penalty_graduated_clearance,
+        weight=-1.0,
+    )
+    collision = RewTerm(
+        func=nav_mdp.cp5_penalty_collision_velocity_scaled,
+        weight=-1.5,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="base")},
+    )
+    stuck = RewTerm(
+        func=nav_mdp.cp6_penalty_stuck_v2,
+        weight=-0.3,
+    )
+    smoothness = RewTerm(
+        func=nav_mdp.cp6_penalty_smoothness_2nd_order,
+        weight=-1.0,
+    )
+
+
+@configclass
+class NeuroGaitNavigationCP6EnvCfg(NeuroGaitNavigationCP5EnvCfg):
+    """CP6: generalized navigation — randomized obstacles + upgraded rewards.
+
+    Inherits the full CP5 setup (PreTrainedPolicyAction, RayCaster camera,
+    1615-dim obs, 5 Hz nav / 50 Hz loco timing) and overrides:
+      - rewards      → CP6RewardsCfg (9 terms, multiplicative core)
+      - events       → adds obstacle randomization EventTerm
+      - terminations → adds goal-reached DoneTerm
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # ── 1. Upgraded reward function ───────────────────────────────────────
+        self.rewards = CP6RewardsCfg()  # type: ignore[assignment]
+
+        # ── 2. Obstacle randomization on every episode reset ──────────────────
+        # Dynamic field addition — Isaac Lab managers discover terms via dir(),
+        # so new fields set on @configclass instances are picked up at runtime.
+        # (Same pattern as CP5's self.actions.pre_trained_policy_action = ...)
+        self.events.randomize_obstacles = EventTerm(  # type: ignore[attr-defined]
+            func=nav_mdp.cp6_randomize_obstacles_and_replan,
+            mode="reset",
+            params={"position_range": {"x": (-1.5, 1.5), "y": (-1.5, 1.5)}},
+        )
+
+        # ── 3. Goal-reached episode termination ───────────────────────────────
+        self.terminations.goal_reached = DoneTerm(  # type: ignore[attr-defined]
+            func=nav_mdp.cp6_goal_reached,
+            params={"threshold": 0.5},
+        )
+
+
+@configclass
+class NeuroGaitNavigationCP6EnvCfg_PLAY(NeuroGaitNavigationCP6EnvCfg):
+    """Single-env CP6 play config for evaluation and trajectory visualisation."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.scene.num_envs    = 1
+        self.scene.env_spacing = 10
+        self.episode_length_s  = 120.0
 
         if getattr(self.scene.terrain, "terrain_generator", None) is not None:
             self.scene.terrain.terrain_generator.num_rows   = 5
