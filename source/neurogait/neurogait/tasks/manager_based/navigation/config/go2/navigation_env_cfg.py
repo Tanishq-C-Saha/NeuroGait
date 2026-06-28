@@ -31,8 +31,8 @@ from neurogait.tasks.manager_based.navigation.navigation_base_env_cfg import (
 from neurogait.tasks.manager_based.navigation import mdp as nav_mdp
 from neurogait.tasks.manager_based.navigation.mdp import occupancy_grid_obs  # CP1
 
-from .cp5_rewards_cfg import CP5RewardsCfg
-from .cp6_rewards_cfg import CP6RewardsCfg
+from .cp5_rewards import CP5RewardsCfg
+from .cp6_rewards import CP6RewardsCfg
 
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG  # isort: skip
 
