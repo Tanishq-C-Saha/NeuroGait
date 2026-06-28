@@ -346,39 +346,33 @@ def cp6_reward_path_following(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 
 def cp6_penalty_graduated_clearance(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """Three-zone obstacle proximity penalty from depth camera.
+    """Gaussian obstacle proximity penalty from the nearest depth return.
 
-    d > 1.0 m  →  0          (free space)
-    0.3 < d ≤ 1.0 m  →  gentle linear ramp  (caution zone)
-    d ≤ 0.3 m  →  velocity-scaled penalty   (danger zone)
+    Output is always in [0, 1]:
+      d = 0.0 m  →  1.00   (contact)
+      d = 0.5 m  →  0.61   (very close)
+      d = 1.0 m  →  0.14   (approaching)
+      d = 1.5 m  →  0.011  (effectively free)
 
-    Uses scene["front_cam"] (MultiMeshRayCasterCamera) minimum depth as a
-    proxy for clearance to the nearest forward obstacle.
+    Formula: exp(-d² / σ²),  σ² = 0.5 m²
+    With weight=-0.05, max contribution per step = -0.05.
 
-    Source: DWA-3D (2024) — graduated zones allow gap squeezing while
-    preventing collisions.
+    Previous version multiplied by robot speed with no upper clamp, producing
+    raw values up to 75 during random-action tests (speed ~15 m/s from physics
+    instability) which drowned all positive rewards at weight=-1.0.
+
+    Source: DWA-3D (2024) — proximity shaping.
     """
     camera = env.scene["front_cam"]
     depth  = camera.data.output["distance_to_image_plane"]   # (E, H, W)
 
-    depth_clean                        = depth.clone()
+    depth_clean = depth.clone()
     depth_clean[torch.isnan(depth_clean)] = 10.0   # rays that miss = far
-    depth_clean[depth_clean <= 0]      = 10.0
+    depth_clean[depth_clean <= 0]         = 10.0
+
     min_depth = depth_clean.reshape(env.num_envs, -1).min(dim=-1).values  # (E,)
 
-    speed = env.scene["robot"].data.root_lin_vel_b[:, :2].norm(dim=-1)   # (E,)
-
-    # Danger zone (d ≤ 0.3 m) — velocity-scaled
-    danger  = (min_depth <= 0.3).float() * 5.0 * speed.clamp(min=0.1)
-
-    # Caution zone (0.3 < d ≤ 1.0 m) — linear fade from 0.5 → 0
-    caution = (
-        ((min_depth > 0.3) & (min_depth <= 1.0)).float()
-        * 0.5
-        * (1.0 - min_depth / 1.0).clamp(min=0.0)
-    )
-
-    return danger + caution   # positive magnitude; weight=-1.0 makes this a penalty
+    return torch.exp(-(min_depth ** 2) / 0.5)   # (E,) in [0, 1]; weight=-0.05 applies penalty
 
 
 def cp6_reward_slow_near_goal(env: ManagerBasedRLEnv) -> torch.Tensor:
