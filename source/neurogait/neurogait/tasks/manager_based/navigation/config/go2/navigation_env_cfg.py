@@ -377,13 +377,12 @@ class NeuroGaitNavigationCP65EnvCfg(NeuroGaitNavigationCP6EnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        # Swap reset event: path-first generation instead of A* replanning
+        # Swap reset event: obstacles-first generation + random goals
         self.events.randomize_obstacles = EventTerm(  # type: ignore[attr-defined]
             func=nav_mdp.cp65_reset_with_generated_scene,
             mode="reset",
             params={
-                "goal_local_xy": (8.0, 0.0),
-                "ramp_steps": 24_576_000,   # 2000 iters × 24 rollouts × 512 envs
+                "ramp_iterations": 40_000,   # ≈ 2000 training iters at 512 envs
             },
         )
 

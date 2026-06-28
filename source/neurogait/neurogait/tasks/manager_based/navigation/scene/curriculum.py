@@ -1,79 +1,79 @@
 """
-Curriculum for progressive navigation difficulty during training.
+Curriculum for progressive navigation difficulty.
 
-Difficulty is controlled by 4 axes:
-  corridor_width        — 2.0m (easy) → 0.51m (just squeezable for Go2)
-  num_obstacles         — 3 (sparse)  → 12 (dense)
-  num_control_points    — 2 (gentle)  → 5 (complex winding)
-  max_lateral_deviation — 1.0m (mild) → 3.0m (extreme turns)
+5 axes ramp from easy to hard over ramp_iterations:
+  min_gap_width  : 2.0m → 0.51m  (corridor tightness — Go2 just-squeezable)
+  num_obstacles  : 3    → 12     (scene density)
+  arena_padding  : 3.0m → 1.5m  (obstacle-to-path proximity — smaller = harder)
+  goal_dist      : (6,7)→ (5,10) (goal distance spread)
+  goal_angle     : (±0.3)→(±0.8) (goal angle spread)
 
-Progress is tracked via env.common_step_counter (Isaac Lab's built-in
-counter, incremented once per env.step() call at nav frequency).
+Usage during training:
+    env._curriculum = NavigationCurriculum()
+    env._curriculum.step()            # call once per reset batch
+    diff = env._curriculum.get_difficulty()
 
-Cite: curriculum learning following DreamerNav (2025) and ANYmal
-Parkour (Hoeller et al., 2024).
-
-Progression:
-  0%:   corridor=2.00m, 3 obstacles, 2 ctrl-pts — learns to move forward
-  25%:  corridor=1.63m, 5 obstacles, 2 ctrl-pts — avoids sparse obstacles
-  50%:  corridor=1.26m, 7 obstacles, 3 ctrl-pts — follows curved paths
-  75%:  corridor=0.88m, 10 obstacles, 4 ctrl-pts — tight winding gaps
-  100%: corridor=0.51m, 12 obstacles, 5 ctrl-pts — just squeezable
+Usage for visualization:
+    curriculum = NavigationCurriculum(ramp_iterations=100)
+    curriculum.current_iteration = 40   # set to 40% progress
+    diff = curriculum.get_difficulty()
 """
 
 from __future__ import annotations
 
-from .scene_generator import MIN_CORRIDOR   # 0.51 m
+from .scene_generator import MIN_GAP
 
 
 class NavigationCurriculum:
-    """Tracks training progress and returns current difficulty parameters.
+    """Counter-based 5-axis curriculum for navigation scene generation."""
 
-    Usage (inside env event function):
-        if not hasattr(env, "_curriculum"):
-            env._curriculum = NavigationCurriculum()
-        difficulty = env._curriculum.get_difficulty(env.common_step_counter)
-    """
-
-    # Easy → Hard limits for each difficulty axis
-    _PARAMS: dict[str, dict] = {
-        "corridor_width":         {"start": 2.00, "end": MIN_CORRIDOR},
-        "num_obstacles":          {"start": 3,    "end": 12},
-        "num_control_points":     {"start": 2,    "end": 5},
-        "max_lateral_deviation":  {"start": 1.0,  "end": 3.0},
-    }
-
-    def __init__(self, ramp_steps: int = 24_576_000):
+    def __init__(self, ramp_iterations: int = 40_000):
         """
         Args:
-            ramp_steps: total env.common_step_counter value at which full
-                        difficulty is reached.  Default = 2000 iterations
-                        × 24 rollouts × 512 envs = 24,576,000 steps.
-                        Scale proportionally for different batch sizes.
+            ramp_iterations: number of `step()` calls before full difficulty.
+                             Training default = 40_000 (~2000 training iterations
+                             at ~20 reset-event calls per iteration for 512 envs).
+                             For visualization, pass ramp_iterations=100 and
+                             set current_iteration directly.
         """
-        self.ramp_steps = ramp_steps
+        self.ramp_iterations = ramp_iterations
+        self.current_iteration = 0
 
-    def get_difficulty(self, current_steps: int) -> dict:
-        """Return current difficulty parameters for the given step count."""
-        t = min(1.0, current_steps / max(1, self.ramp_steps))
+    def step(self) -> None:
+        """Increment internal counter by one. Call once per episode reset batch."""
+        self.current_iteration = min(self.current_iteration + 1, self.ramp_iterations)
 
-        result: dict = {}
-        for key, limits in self._PARAMS.items():
-            val = limits["start"] + t * (limits["end"] - limits["start"])
-            if key in ("num_obstacles", "num_control_points"):
-                val = int(round(val))
-            result[key] = val
+    def get_difficulty(self) -> dict:
+        """Return current difficulty params as a dict.
 
-        return result
+        Keys: min_gap_width, num_obstacles, arena_padding,
+              goal_dist (tuple), goal_angle (tuple)
+        """
+        t = self.current_iteration / max(1, self.ramp_iterations)
+        t = min(1.0, t)
 
-    def progress_str(self, current_steps: int) -> str:
-        """One-line progress summary for rate-limited logging."""
-        t   = min(1.0, current_steps / max(1, self.ramp_steps))
-        d   = self.get_difficulty(current_steps)
+        def lerp(a, b):
+            return a + t * (b - a)
+
+        def lerp_tuple(a, b):
+            return (lerp(a[0], b[0]), lerp(a[1], b[1]))
+
+        return {
+            "min_gap_width":  lerp(2.00, MIN_GAP),     # 2.0m → 0.51m
+            "num_obstacles":  int(round(lerp(3, 12))),  # 3 → 12
+            "arena_padding":  lerp(3.0, 1.5),           # 3.0m → 1.5m
+            "goal_dist":      lerp_tuple((6.0, 7.0), (5.0, 10.0)),
+            "goal_angle":     lerp_tuple((-0.3, 0.3), (-0.8, 0.8)),
+        }
+
+    def progress_str(self) -> str:
+        """One-line summary for rate-limited training log."""
+        t = min(1.0, self.current_iteration / max(1, self.ramp_iterations))
+        d = self.get_difficulty()
         return (
             f"Curriculum {t * 100:.0f}%: "
-            f"corridor={d['corridor_width']:.2f}m, "
-            f"obstacles={d['num_obstacles']}, "
-            f"ctrl_pts={d['num_control_points']}, "
-            f"deviation={d['max_lateral_deviation']:.1f}m"
+            f"gap={d['min_gap_width']:.2f}m, "
+            f"obs={d['num_obstacles']}, "
+            f"pad={d['arena_padding']:.1f}m, "
+            f"angle=±{d['goal_angle'][1]:.1f}rad"
         )

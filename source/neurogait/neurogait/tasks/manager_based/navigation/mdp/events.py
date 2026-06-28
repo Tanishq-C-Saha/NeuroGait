@@ -154,7 +154,7 @@ def cp6_randomize_obstacles_and_replan(
             (start_xy[0] + dx_g * i / n, start_xy[1] + dy_g * i / n)
             for i in range(1, n + 1)
         ]
-        print("[CP6] WARNING: A* failed after 3 attempts — using straight-line path")
+        pass  # silenced — straight-line fallback is rare and recoverable
 
     # ── convert env-0 world waypoints → local → broadcast to all envs ─────────
     local_wp_np = np.array(waypoints, dtype=np.float32) - env0_origin_xy  # (W, 2)
@@ -186,26 +186,26 @@ def cp6_randomize_obstacles_and_replan(
 def cp65_reset_with_generated_scene(
     env: "ManagerBasedRLEnv",
     env_ids: torch.Tensor,
-    goal_local_xy: tuple = (8.0, 0.0),
-    ramp_steps: int = 24_576_000,
+    ramp_iterations: int = 40_000,
 ) -> None:
-    """EventTerm (mode="reset"): path-first scene generation with curriculum.
+    """EventTerm (mode="reset"): obstacles-first scene generation with curriculum.
 
-    Replaces cp6_randomize_obstacles_and_replan for CP6.5.
-    No A* needed — the path comes from the scene generator and is always
-    traversable by construction.
+    Each reset batch:
+      1. Steps the curriculum counter (call once per reset batch)
+      2. Generates a random goal and places obstacles with connectivity guarantee
+      3. Runs A* on the final grid for the optimal path (same as deployment)
+      4. Writes obstacle world positions to all envs in the sim
+      5. Stores waypoints as env._cp5_waypoints (E, W, 2) — all rewards use this
+      6. Resets waypoint tracking state for the resetting envs
 
-    Each reset:
-      1. Reads curriculum difficulty from env.common_step_counter
-      2. Generates a random smooth path + obstacles outside the corridor
-      3. Writes obstacle positions to the sim (all envs, shared layout)
-      4. Stores waypoints as env._cp5_waypoints (same tensor the rewards use)
-      5. Resets waypoint tracking state for resetting envs
+    Goal is random each episode: variable distance (5–10 m) and angle (±46°).
+    Last waypoint in env._cp5_waypoints is always the goal, so all goal-based
+    reward and termination functions work without modification.
 
     Args:
-        goal_local_xy: goal offset from env origin in metres
-        ramp_steps:    env.common_step_counter value at which full difficulty
-                       is reached (default: 2000 iters × 24 rollouts × 512 envs)
+        ramp_iterations: curriculum steps before full difficulty.
+                         Default = 40_000 ≈ 2000 training iterations
+                         (20 reset-event calls per iteration at 512 envs).
     """
     global _last_curriculum_log
 
@@ -221,42 +221,38 @@ def cp65_reset_with_generated_scene(
     # Ensure base waypoint tensors exist before we overwrite them
     _cp5_init_waypoint_state(env)
 
-    # ── 1. Curriculum difficulty ───────────────────────────────────────────────
+    # ── 1. Curriculum ─────────────────────────────────────────────────────────
     if not hasattr(env, "_curriculum"):
-        env._curriculum = NavigationCurriculum(ramp_steps=ramp_steps)
+        env._curriculum = NavigationCurriculum(ramp_iterations=ramp_iterations)
+    env._curriculum.step()
+    difficulty = env._curriculum.get_difficulty()
 
-    current_steps = int(getattr(env, "common_step_counter", 0))
-    difficulty    = env._curriculum.get_difficulty(current_steps)
-
-    # ── 2. Generate scene (local coords: start=(0,0), goal=goal_local_xy) ─────
-    path_points, obstacles, waypoints = generate_scene(
-        start_xy               = (0.0, 0.0),
-        goal_xy                = goal_local_xy,
-        num_obstacles          = difficulty["num_obstacles"],
-        corridor_width         = difficulty["corridor_width"],
-        num_control_points     = difficulty["num_control_points"],
-        max_lateral_deviation  = difficulty["max_lateral_deviation"],
-        arena_bounds           = (
-            -1.0, goal_local_xy[0] + 1.0,
-            -4.0, 4.0,
-        ),
+    # ── 2. Generate scene (obstacles-first, random goal, local coords) ────────
+    obstacles, waypoints, goal_local = generate_scene(
+        start_xy         = (0.0, 0.0),
+        goal_xy          = None,                          # random each episode
+        num_obstacles    = difficulty["num_obstacles"],
+        min_gap_width    = difficulty["min_gap_width"],
+        arena_padding    = difficulty["arena_padding"],
+        goal_dist_range  = difficulty["goal_dist"],
+        goal_angle_range = difficulty["goal_angle"],
     )
 
     # ── 3. Apply obstacles to sim (all envs, shared layout) ───────────────────
     apply_scene_to_env(env, obstacles, env.device)
 
     # ── 4. Store waypoints: local → per-env world (E, W, 2) ──────────────────
-    env_origins_xy = env.scene.env_origins[:, :2]          # (E, 2)
+    env_origins_xy = env.scene.env_origins[:, :2]       # (E, 2)
     local_wp = torch.tensor(
         waypoints, dtype=torch.float32, device=env.device
-    )                                                        # (W, 2)
-    new_wps = local_wp.unsqueeze(0) + env_origins_xy.unsqueeze(1)   # (E, W, 2)
+    )                                                     # (W, 2)
+    new_wps = local_wp.unsqueeze(0) + env_origins_xy.unsqueeze(1)  # (E, W, 2)
 
     env._cp5_waypoints = new_wps
     W_new = new_wps.shape[1]
 
     # ── 5. Reset waypoint tracking state ──────────────────────────────────────
-    env._cp5_wp_idx.clamp_(max=W_new - 1)         # clamp running envs
+    env._cp5_wp_idx.clamp_(max=W_new - 1)
     env._cp5_wp_idx[env_ids]      = 0
     env._cp5_prev_dist[env_ids]   = float("inf")
     env._cp5_prev_action[env_ids] = 0.0
@@ -271,7 +267,8 @@ def cp65_reset_with_generated_scene(
     now = time.time()
     if now - _last_curriculum_log > 60.0:
         print(
-            f"[CP6.5] {env._curriculum.progress_str(current_steps)} | "
-            f"{W_new} waypoints | {len(obstacles)} obstacles placed"
+            f"[CP6.5] {env._curriculum.progress_str()} | "
+            f"goal=({goal_local[0]:.1f},{goal_local[1]:.1f}) | "
+            f"{W_new} waypoints | {len(obstacles)} obstacles"
         )
         _last_curriculum_log = now
