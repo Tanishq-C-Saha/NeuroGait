@@ -20,9 +20,7 @@ from isaaclab.envs import mdp as env_mdp
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
-from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm
-from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import CameraCfg, MultiMeshRayCasterCameraCfg
 from isaaclab.sensors.ray_caster import patterns
 from isaaclab.utils import configclass
@@ -32,6 +30,9 @@ from neurogait.tasks.manager_based.navigation.navigation_base_env_cfg import (
 )
 from neurogait.tasks.manager_based.navigation import mdp as nav_mdp
 from neurogait.tasks.manager_based.navigation.mdp import occupancy_grid_obs  # CP1
+
+from .cp5_rewards_cfg import CP5RewardsCfg
+from .cp6_rewards_cfg import CP6RewardsCfg
 
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG  # isort: skip
 
@@ -195,44 +196,6 @@ class NeuroGaitNavigationCP1EnvCfg_PLAY(NeuroGaitNavigationCP1EnvCfg):
 
 
 @configclass
-class CP5RewardsCfg:
-    """7 research-backed navigation reward terms for CP5."""
-
-    velocity_toward_goal = RewTerm(
-        func=nav_mdp.cp5_reward_velocity_toward_goal,
-        weight=10.0,
-    )
-    goal_proximity = RewTerm(
-        func=nav_mdp.cp5_reward_goal_proximity,
-        weight=0.1,   # was 3.0 — reduced to prevent 10× dominance over velocity_toward_goal
-    )
-    goal_reached = RewTerm(
-        func=nav_mdp.cp5_reward_goal_reached,
-        weight=20.0,
-    )
-    collision = RewTerm(
-        func=nav_mdp.cp5_penalty_collision_velocity_scaled,
-        weight=-5.0,
-        params={
-            # "base" body only — avoids false-zero from masking all bodies with ".*"
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names="base"),
-        },
-    )
-    stuck = RewTerm(
-        func=nav_mdp.cp5_penalty_stuck,
-        weight=-0.3,
-    )
-    heading = RewTerm(
-        func=nav_mdp.cp5_reward_heading,
-        weight=0.1,
-    )
-    smoothness = RewTerm(
-        func=nav_mdp.cp5_penalty_smoothness,
-        weight=-0.01,
-    )
-
-
-@configclass
 class NeuroGaitNavigationCP5EnvCfg(NeuroGaitNavigationGo2BaseEnvCfg):
     """CP5: Trained navigation policy with PreTrainedPolicyAction + RayCaster camera.
 
@@ -342,60 +305,6 @@ class NeuroGaitNavigationCP5EnvCfg_PLAY(NeuroGaitNavigationCP5EnvCfg):
 
 
 @configclass
-class CP6RewardsCfg:
-    """CP6 reward function — 9 terms from published literature.
-
-    Sources:
-      multiplicative core  — Miki et al. 2022 (Science Robotics)
-      path following        — pure-pursuit concept + NavRL++
-      graduated clearance  — DWA-3D (2024)
-      goal proximity       — Li et al. (2025)
-      goal reached         — X-Nav (2025)
-      collision            — SEA-Nav (Huang et al., 2026)
-      stuck                — SEA-Nav (2026) with near-goal patch
-      2nd-order smoothness — Go2 task (2025)
-    """
-
-    navigation_core = RewTerm(
-        func=nav_mdp.cp6_reward_navigation_core,
-        weight=10.0,
-    )
-    path_following = RewTerm(
-        func=nav_mdp.cp6_reward_path_following,
-        weight=5.0,
-    )
-    goal_proximity = RewTerm(
-        func=nav_mdp.cp5_reward_goal_proximity,
-        weight=0.1,
-    )
-    goal_reached = RewTerm(
-        func=nav_mdp.cp5_reward_goal_reached,
-        weight=50.0,
-    )
-    slow_near_goal = RewTerm(
-        func=nav_mdp.cp6_reward_slow_near_goal,
-        weight=3.0,
-    )
-    graduated_clearance = RewTerm(
-        func=nav_mdp.cp6_penalty_graduated_clearance,
-        weight=-1.0,
-    )
-    collision = RewTerm(
-        func=nav_mdp.cp5_penalty_collision_velocity_scaled,
-        weight=-1.5,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="base")},
-    )
-    stuck = RewTerm(
-        func=nav_mdp.cp6_penalty_stuck_v2,
-        weight=-0.3,
-    )
-    smoothness = RewTerm(
-        func=nav_mdp.cp6_penalty_smoothness_2nd_order,
-        weight=-1.0,
-    )
-
-
-@configclass
 class NeuroGaitNavigationCP6EnvCfg(NeuroGaitNavigationCP5EnvCfg):
     """CP6: generalized navigation — randomized obstacles + upgraded rewards.
 
@@ -425,7 +334,7 @@ class NeuroGaitNavigationCP6EnvCfg(NeuroGaitNavigationCP5EnvCfg):
         # ── 3. Goal-reached episode termination ───────────────────────────────
         self.terminations.goal_reached = DoneTerm(  # type: ignore[attr-defined]
             func=nav_mdp.cp6_goal_reached,
-            params={"threshold": 0.5},
+            params={"threshold": 0.1},
         )
 
 
