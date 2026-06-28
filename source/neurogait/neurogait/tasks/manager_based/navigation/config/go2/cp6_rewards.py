@@ -28,7 +28,7 @@ class CP6RewardsCfg:
     )
     path_following = RewTerm(
         func=nav_mdp.cp6_reward_path_following,
-        weight=1.0,   # 5.0 → 1.0: was 5× too dominant vs navigation_core at runtime
+        weight=0.5,   # 5.0 → 1.0 → 0.5: tuned to ~0.5× navigation_core at runtime
     )
     goal_proximity = RewTerm(
         func=nav_mdp.cp5_reward_goal_proximity,
